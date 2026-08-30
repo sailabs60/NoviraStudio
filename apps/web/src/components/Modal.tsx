@@ -43,6 +43,30 @@ export function Modal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreFocusTo = useRef<HTMLElement | null>(null);
 
+  /*
+   * The latest `onClose`, read by the effect below without being one of its
+   * dependencies.
+   *
+   * Every caller in this codebase passes `onClose={() => setSomething(false)}`
+   * — a fresh function every render. If a form field inside the dialog holds
+   * its own state in the *same* component that owns `open` (the common case:
+   * "New project", "New plan"), every keystroke re-renders that component,
+   * manufactures a new `onClose`, and used to be a dependency of the
+   * focus-trap effect below — tearing it down and setting it up again on
+   * every character typed. The teardown restores focus to whatever was
+   * focused when the dialog first opened (the button that opened it, now
+   * sitting behind the overlay), and the setup's 40 ms timer then throws
+   * focus at the *first* focusable element in the dialog, which is the header's
+   * close button, not the field being typed in. The field never got a second
+   * character without being clicked back into.
+   *
+   * A ref sidesteps this entirely: the effect only needs `open` to decide
+   * whether to run at all, and reads whatever `onClose` currently is at the
+   * moment Escape is actually pressed.
+   */
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return undefined;
 
@@ -61,7 +85,7 @@ export function Modal({
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (escapeStack[escapeStack.length - 1] === token) onClose();
+        if (escapeStack[escapeStack.length - 1] === token) onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -100,7 +124,9 @@ export function Modal({
       if (index >= 0) escapeStack.splice(index, 1);
       restoreFocusTo.current?.focus?.();
     };
-  }, [open, onClose]);
+    // `onClose` is deliberately not a dependency — see `onCloseRef` above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!open) return null;
 

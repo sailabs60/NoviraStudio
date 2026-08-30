@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MoreHorizontal, Plus, Trash2, Pencil } from 'lucide-react';
@@ -33,6 +33,21 @@ export function DashboardPage() {
     },
     onError: (err) => setError(err instanceof ApiClientError ? err.message : 'Could not create the project.'),
   });
+  /*
+   * A second click inside the same event-loop tick reads `create.isPending`
+   * before React has re-rendered with it — the window is small, but two
+   * clicks close together land in it often enough that the same title has
+   * shown up twice in the project list. `disabled` is still there for the
+   * visual state; this ref is what actually makes a second submission
+   * impossible, since it is checked and set synchronously rather than
+   * waiting on a render.
+   */
+  const submittingRef = useRef(false);
+  const submitCreate = () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    create.mutate(undefined, { onSettled: () => { submittingRef.current = false; } });
+  };
 
   const remove = useMutation({
     mutationFn: (id: number) => api.projects.remove(id),
@@ -159,7 +174,7 @@ export function DashboardPage() {
           <>
             <button type="button" className="btn-secondary" onClick={() => setCreating(false)}>Cancel</button>
             <button type="button" className="btn-primary" disabled={!title.trim() || create.isPending}
-              onClick={() => create.mutate()}>
+              onClick={submitCreate}>
               {create.isPending ? 'Creating…' : 'Create project'}
             </button>
           </>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, FileText, Plus, Trash2, Users } from 'lucide-react';
@@ -31,6 +31,15 @@ export function ProjectPage() {
     onSuccess: (plan) => navigate(`/editor/${plan.id}`),
     onError: (err) => setError(err instanceof ApiClientError ? err.message : 'Could not create the plan.'),
   });
+  // See the identical guard in DashboardPage: `disabled` alone leaves a
+  // window, between a fast double click and the next render, in which a
+  // second click still reads `isPending` as false.
+  const submittingRef = useRef(false);
+  const submitCreate = () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    create.mutate(undefined, { onSettled: () => { submittingRef.current = false; } });
+  };
 
   const remove = useMutation({
     mutationFn: (planId: number) => api.plans.remove(planId),
@@ -132,7 +141,7 @@ export function ProjectPage() {
           <>
             <button type="button" className="btn-secondary" onClick={() => setCreating(false)}>Cancel</button>
             <button type="button" className="btn-primary" disabled={!title.trim() || create.isPending}
-              onClick={() => create.mutate()}>
+              onClick={submitCreate}>
               {create.isPending ? 'Creating…' : 'Create and open'}
             </button>
           </>
