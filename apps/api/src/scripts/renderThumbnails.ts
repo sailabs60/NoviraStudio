@@ -19,6 +19,7 @@
  * The camera frames each model from its own bounding box, so a 3 m banquet
  * table and a 40 cm plate both fill the frame.
  */
+import 'dotenv/config';
 import { chromium } from 'playwright';
 import * as esbuild from 'esbuild';
 import { mkdir, writeFile } from 'node:fs/promises';

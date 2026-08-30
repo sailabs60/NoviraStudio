@@ -6,6 +6,7 @@
  * CDN mid-session, and lets us ship the small 1k variants rather than whatever
  * size a preset helper decides to fetch.
  */
+import 'dotenv/config';
 import { LIGHTING_PRESETS } from '@novira/shared';
 import { downloadToAssets } from '../services/storage.js';
 import { hdriUrl } from '../services/assetSources/polyHavenDirect.js';

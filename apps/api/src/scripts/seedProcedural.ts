@@ -6,6 +6,7 @@
  * a table of the wrong size should be caught by the same check that catches a
  * mislabelled download, not trusted because we wrote it.
  */
+import 'dotenv/config';
 import { CATALOG_CATEGORIES } from '@novira/shared';
 import { prisma } from '../lib/prisma.js';
 import { PROCEDURAL_ITEMS } from '../services/proceduralAssets.js';

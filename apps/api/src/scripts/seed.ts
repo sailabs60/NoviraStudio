@@ -6,6 +6,7 @@
  * runtime. This script sets the defaults an empty database needs to work; it is
  * idempotent, so it is safe to re-run after a schema change.
  */
+import 'dotenv/config';
 import {
   CATALOG_CATEGORIES,
   DEFAULT_CREDIT_RATIOS,

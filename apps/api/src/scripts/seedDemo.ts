@@ -9,6 +9,7 @@
  * Idempotent: re-running resets the passwords and credit balances back to the
  * documented values without duplicating anyone.
  */
+import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import type { MemberRole, MemberVisibility, PlanTier, UserRole } from '@novira/shared';
 import { prisma } from '../lib/prisma.js';

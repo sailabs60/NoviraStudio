@@ -21,6 +21,7 @@
  *
  * Run with: npm run seed:rotana --workspace=apps/api
  */
+import 'dotenv/config';
 import path from 'node:path';
 import { access, readFile } from 'node:fs/promises';
 import { emptyVenueSpec } from '@novira/shared';

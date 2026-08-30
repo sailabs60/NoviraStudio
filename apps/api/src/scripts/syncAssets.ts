@@ -12,6 +12,7 @@
  *   npm run assets:sync -- --category chairs
  *   npm run assets:sync -- --report           write a CSV of every decision
  */
+import 'dotenv/config';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { CATALOG_CATEGORIES } from '@novira/shared';

@@ -7,6 +7,7 @@
  * arithmetic check while the mesh was upside down, and only measuring the
  * vertices caught it.
  */
+import 'dotenv/config';
 import { NodeIO } from '@gltf-transform/core';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
