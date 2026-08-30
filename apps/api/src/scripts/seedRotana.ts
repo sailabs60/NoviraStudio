@@ -39,7 +39,15 @@ const SOURCE_CANDIDATES = [
 const BUILDING = 'Johari Rotana';
 const CITY = 'Dar es Salaam';
 const COUNTRY = 'TZ';
-const REGION = 'global';
+// The room's market — Tanzania, since it is a real Dar es Salaam building —
+// not to be confused with `scope: 'global'` below, which controls who can
+// see the record. Getting this wrong would silently switch a plan back to
+// USD the moment someone applied this venue.
+const REGION = 'tanzania';
+const PREVIEW_CANDIDATES = [
+  path.resolve(process.cwd(), '../../jr rotana.png'),
+  path.resolve(process.cwd(), 'jr rotana.png'),
+];
 const SOURCE_NOTE =
   'Published figures from rotana.com, Cvent and Hire Space, September 2026. ' +
   'Confirm rigging capacities and power with the hotel before load-in.';
@@ -127,8 +135,8 @@ const ROOMS: RoomSeed[] = [
   },
 ];
 
-async function findSource(): Promise<string | null> {
-  for (const candidate of SOURCE_CANDIDATES) {
+async function findFirst(candidates: string[]): Promise<string | null> {
+  for (const candidate of candidates) {
     try {
       await access(candidate);
       return candidate;
@@ -140,11 +148,21 @@ async function findSource(): Promise<string | null> {
 }
 
 async function main() {
-  const source = await findSource();
+  const source = await findFirst(SOURCE_CANDIDATES);
 
   let modelUrl: string | null = null;
   let floorLevels: unknown[] = [];
   let modelFacts: Record<string, unknown> | null = null;
+  let previewUrl: string | null = null;
+
+  const previewSource = await findFirst(PREVIEW_CANDIDATES);
+  if (previewSource) {
+    const staged = await saveAssetBuffer(await readFile(previewSource), 'venues/johari-rotana-preview.png');
+    previewUrl = staged.url;
+    console.log(`[rotana] using ${path.basename(previewSource)} as the preview image.`);
+  } else {
+    console.warn('[rotana] no preview image found; the card will show without a thumbnail.');
+  }
 
   if (source) {
     console.log(`[rotana] preparing ${path.basename(source)}…`);
@@ -212,6 +230,7 @@ async function main() {
       ...(room.withModel
         ? { modelUrl, floorLevels: floorLevels as object, modelFacts: modelFacts as object }
         : {}),
+      previewUrl,
       verified: true,
       verifiedAt: new Date(),
       sourceNote: `${room.note} ${SOURCE_NOTE}`,

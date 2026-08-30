@@ -206,7 +206,21 @@ function VenueCard({
   const area = (venue.widthMm * venue.depthMm) / 1_000_000;
 
   return (
-    <article className="card flex flex-col">
+    <article className="card flex flex-col overflow-hidden p-0">
+      <div className="relative h-32 w-full shrink-0 bg-gradient-to-br from-primary/15 to-surface-muted">
+        {venue.previewUrl ? (
+          <img src={venue.previewUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-ink-subtle/40">
+            <Building2 className="h-10 w-10" />
+          </div>
+        )}
+        {venue.verified ? (
+          <span className="badge-success absolute right-2 top-2 shadow-sm">Verified</span>
+        ) : null}
+      </div>
+
+      <div className="flex flex-1 flex-col p-4 pt-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h2 className="truncate text-sm font-semibold text-ink">{venue.name}</h2>
@@ -214,7 +228,6 @@ function VenueCard({
             {[venue.buildingName, venue.city, VENUE_SPACE_LABELS[venue.spaceType]].filter(Boolean).join(' · ')}
           </p>
         </div>
-        {venue.verified ? <span className="badge-success shrink-0">Verified</span> : null}
       </div>
 
       <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
@@ -338,6 +351,7 @@ function VenueCard({
         <button type="button" className="btn-ghost btn-sm text-danger" onClick={onDelete} aria-label={`Delete ${venue.name}`}>
           <Trash2 className="h-3.5 w-3.5" />
         </button>
+      </div>
       </div>
     </article>
   );

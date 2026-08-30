@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Box, FolderOpen, Trash2 } from 'lucide-react';
 import { formatLength, type CatalogItemDto } from '@novira/shared';
@@ -6,51 +6,16 @@ import { assets } from '../lib/assetsApi';
 import { LazyImage } from '../components/LazyImage';
 import { useEditor } from './editorStore';
 import { draggableProps } from './useDropTarget';
-import { CollectionsTab } from './CollectionsTab';
 import { toast } from '../components/ui';
 
 /**
- * What this account has brought in.
+ * What this account has imported from an online library and copied onto our
+ * own storage — measured, permanent, and usable in any plan.
  *
- * Two things live here, and they are different in a way worth keeping separate.
- * **Imports** are models pulled from an online library and copied onto our own
- * storage — measured, permanent, and usable in any plan. **Collections** are
- * groupings of catalogue items someone has saved for reuse.
- *
- * The distinction matters at delete time: removing an import would break every
- * plan that already placed it, so it is deactivated rather than deleted and the
- * panel says so.
+ * Removing one would break every plan that already placed it, so it is
+ * deactivated rather than deleted and the panel says so.
  */
 export function MyLibrary() {
-  const [tab, setTab] = useState<'imports' | 'collections'>('imports');
-
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 px-3 pt-2.5">
-        <div className="ed-segment w-full">
-          <button
-            type="button"
-            onClick={() => setTab('imports')}
-            className={`ed-segment-btn flex-1 ${tab === 'imports' ? 'ed-segment-btn-active' : ''}`}
-          >
-            Imported
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('collections')}
-            className={`ed-segment-btn flex-1 ${tab === 'collections' ? 'ed-segment-btn-active' : ''}`}
-          >
-            Collections
-          </button>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1">{tab === 'imports' ? <ImportedModels /> : <CollectionsTab />}</div>
-    </div>
-  );
-}
-
-function ImportedModels() {
   const queryClient = useQueryClient();
   const units = useEditor((s) => s.units);
   const cacheItems = useEditor((s) => s.cacheItems);

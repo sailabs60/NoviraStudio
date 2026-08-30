@@ -18,7 +18,8 @@
     "assets:verify": "tsx src/scripts/verifyAssets.ts",
     "assets:procedural": "tsx src/scripts/seedProcedural.ts",
     "assets:hdri": "tsx src/scripts/syncHdris.ts",
-    "seed:rotana": "tsx src/scripts/seedRotana.ts"
+    "seed:rotana": "tsx src/scripts/seedRotana.ts",
+    "seed:collections": "tsx src/scripts/seedCollections.ts"
   },
   "prisma": {
     "seed": "tsx src/scripts/seed.ts"

@@ -6,6 +6,7 @@ import {
   Frame,
   Image as ImageIcon,
   LayoutGrid,
+  Layers,
   Ruler,
   Shapes,
   Sun,
@@ -16,6 +17,7 @@ import {
 import { CatalogPanel } from '../CatalogPanel';
 import { AssetBrowser, ProviderSummary } from '../AssetBrowser';
 import { MyLibrary } from '../MyLibrary';
+import { CollectionsTab } from '../CollectionsTab';
 import { QuickLayout } from '../QuickLayout';
 import { TableDesigner } from '../TableDesigner';
 import { SeatingPanel } from '../SeatingPanel';
@@ -109,7 +111,7 @@ function ModelsGroup() {
   // Online first: eighteen libraries dwarf the measured catalogue, and the
   // ask most people bring here — "find me a chair" — is served better by
   // a wall of real photography than by the smaller curated set.
-  const [tab, setTab] = useState<'catalogue' | 'online' | 'mine'>('online');
+  const [tab, setTab] = useState<'catalogue' | 'online' | 'mine' | 'collections'>('online');
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -124,6 +126,9 @@ function ModelsGroup() {
           <Tab active={tab === 'mine'} onClick={() => setTab('mine')} icon={<FolderOpen className="h-3 w-3" />}>
             Mine
           </Tab>
+          <Tab active={tab === 'collections'} onClick={() => setTab('collections')} icon={<Layers className="h-3 w-3" />}>
+            Collections
+          </Tab>
         </div>
       </div>
 
@@ -135,8 +140,10 @@ function ModelsGroup() {
             category="models"
             emptyHint="No models came back from the online libraries just now. The measured catalogue is unaffected."
           />
-        ) : (
+        ) : tab === 'mine' ? (
           <MyLibrary />
+        ) : (
+          <CollectionsTab />
         )}
       </div>
 

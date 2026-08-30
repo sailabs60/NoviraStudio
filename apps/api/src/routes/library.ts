@@ -164,11 +164,14 @@ templatesRouter.delete(
 collectionsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
+    // The curated starter sets are available to everybody; a personal
+    // collection saved from a plan is visible only to the account that saved it.
     const rows = await prisma.collection.findMany({
-      where: { ownerId: req.user!.id },
-      orderBy: { createdAt: 'desc' },
+      where: { OR: [{ scope: 'global' }, { ownerId: req.user!.id }] },
+      orderBy: [{ scope: 'asc' }, { createdAt: 'desc' }],
       select: {
         id: true,
+        scope: true,
         name: true,
         objectCount: true,
         summary: true,
@@ -179,6 +182,7 @@ collectionsRouter.get(
     res.json({
       items: rows.map((r) => ({
         id: Number(r.id),
+        scope: r.scope as 'local' | 'global',
         name: r.name,
         objectCount: r.objectCount,
         summary: r.summary,
@@ -208,6 +212,7 @@ collectionsRouter.post(
     const collection = await prisma.collection.create({
       data: {
         ownerId: req.user!.id,
+        scope: 'local',
         name: body.name,
         objects: body.objects as object,
         objectCount: body.objects.length,
@@ -235,7 +240,7 @@ collectionsRouter.get(
     if (!id) throw ApiError.notFound('Collection not found.');
     const collection = await prisma.collection.findUnique({ where: { id } });
     if (!collection) throw ApiError.notFound('Collection not found.');
-    if (collection.ownerId !== req.user!.id) {
+    if (collection.scope !== 'global' && collection.ownerId !== req.user!.id) {
       throw ApiError.forbidden('That collection belongs to someone else.');
     }
     res.json({ id: Number(collection.id), name: collection.name, objects: collection.objects });
@@ -247,9 +252,12 @@ collectionsRouter.delete(
   asyncHandler(async (req, res) => {
     const id = toId(req.params.id);
     if (!id) throw ApiError.notFound('Collection not found.');
+    const user = req.user!;
     const collection = await prisma.collection.findUnique({ where: { id } });
     if (!collection) throw ApiError.notFound('Collection not found.');
-    if (collection.ownerId !== req.user!.id) {
+    // A curated starter set belongs to everybody, so only an administrator
+    // retires one — the same rule a global template already follows.
+    if (collection.scope === 'global' ? user.role !== 'super_admin' : collection.ownerId !== user.id) {
       throw ApiError.forbidden('That collection belongs to someone else.');
     }
     await prisma.collection.delete({ where: { id } });

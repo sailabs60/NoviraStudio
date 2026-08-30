@@ -368,7 +368,10 @@ model Template {
 
 model Collection {
   id           BigInt   @id @default(autoincrement())
-  ownerId      BigInt   @map("owner_id")
+  ownerId      BigInt?  @map("owner_id")
+  /// 'local' is a personal, saved-from-a-plan collection; 'global' is a
+  /// Novira-curated starter set every account can see and place from.
+  scope        String   @default("local") @db.VarChar(8)
   name         String   @db.VarChar(180)
   objects      Json
   objectCount  Int      @map("object_count")
@@ -377,8 +380,9 @@ model Collection {
   sourcePlanId BigInt?  @map("source_plan_id")
   createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(3)
 
-  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner User? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
 
+  @@index([scope])
   @@index([ownerId])
   @@map("collection")
 }

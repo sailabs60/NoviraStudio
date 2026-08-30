@@ -7,6 +7,7 @@ import { Spinner } from '../components/Spinner';
 
 interface CollectionRow {
   id: number;
+  scope: 'local' | 'global';
   name: string;
   objectCount: number;
   summary: string | null;
@@ -82,13 +83,57 @@ export function CollectionsTab() {
     );
   }
 
+  const prebuilt = data.filter((c) => c.scope === 'global');
+  const mine = data.filter((c) => c.scope === 'local');
+
   return (
     <div className="flex-1 overflow-y-auto px-2 py-2">
+      {prebuilt.length ? (
+        <CollectionGroup
+          title="Prebuilt"
+          hint="Ready-made sets — a full table, a lounge corner, a check-in desk. Placing one keeps every piece arranged."
+          items={prebuilt}
+          disabled={readOnly || place.isPending}
+          onPlace={(id) => place.mutate(id)}
+        />
+      ) : null}
+      {mine.length ? (
+        <CollectionGroup
+          title="Yours"
+          items={mine}
+          disabled={readOnly || place.isPending}
+          onPlace={(id) => place.mutate(id)}
+          onRemove={(id) => remove.mutate(id)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function CollectionGroup({
+  title,
+  hint,
+  items,
+  disabled,
+  onPlace,
+  onRemove,
+}: {
+  title: string;
+  hint?: string;
+  items: CollectionRow[];
+  disabled: boolean;
+  onPlace: (id: number) => void;
+  onRemove?: (id: number) => void;
+}) {
+  return (
+    <div className="mb-2">
+      <p className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wide text-ink-subtle">{title}</p>
+      {hint ? <p className="px-1 pb-1.5 text-[10px] leading-relaxed text-ink-subtle">{hint}</p> : null}
       <ul className="space-y-1">
-        {data.map((collection) => (
+        {items.map((collection) => (
           <li key={collection.id} className="relative">
-            <button type="button" disabled={readOnly || place.isPending}
-              onClick={() => place.mutate(collection.id)}
+            <button type="button" disabled={disabled}
+              onClick={() => onPlace(collection.id)}
               className="ed-item-card w-full">
               {collection.previewUrl ? (
                 <img src={collection.previewUrl} alt="" className="ed-thumb" loading="lazy" />
@@ -107,11 +152,13 @@ export function CollectionsTab() {
                 ) : null}
               </span>
             </button>
-            <button type="button" aria-label="Delete collection"
-              onClick={() => remove.mutate(collection.id)}
-              className="icon-btn absolute right-1 top-1 h-6 w-6">
-              <Trash2 className="h-3 w-3" />
-            </button>
+            {onRemove ? (
+              <button type="button" aria-label="Delete collection"
+                onClick={() => onRemove(collection.id)}
+                className="icon-btn absolute right-1 top-1 h-6 w-6">
+                <Trash2 className="h-3 w-3" />
+              </button>
+            ) : null}
           </li>
         ))}
       </ul>
