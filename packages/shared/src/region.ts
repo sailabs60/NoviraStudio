@@ -62,6 +62,17 @@ export interface RegionPack {
   regulations: RegulatoryOverlay;
   /** Rough cost index against the default rate card, in basis points. */
   costIndexBp: number;
+  /**
+   * Roughly how many units of this region's currency equal one US dollar —
+   * an approximate, rounded, will-drift-with-the-market figure, not a live
+   * rate. The built-in rate card is priced in US cents; without this, "USD
+   * 38 relabelled TZS" renders as "TZS 38", which is a real number in the
+   * wrong currency by a factor of thousands rather than a price anyone could
+   * quote. It exists so a default rate card is at least the right *order of
+   * magnitude* in its own currency — a starting point to correct with real
+   * rates, the same as the cost index next to it, not a claim to track FX.
+   */
+  fxPerUsd: number;
 }
 
 /**
@@ -100,11 +111,53 @@ export const REGION_PACKS: RegionPack[] = [
       ],
     },
     costIndexBp: 10_000,
+    fxPerUsd: 1,
+  },
+  {
+    code: 'tanzania',
+    label: 'Tanzania',
+    countries: ['TZ'],
+    units: 'metric',
+    currency: 'tzs',
+    voltage: 230,
+    frequency: 50,
+    voltage3ph: 400,
+    trussRegion: 'africa',
+    boothModuleMm: { width: 3000, depth: 3000 },
+    stageDeckMm: 2000,
+    standardWallHeightMm: 2400,
+    materials: [
+      'Printed vinyl on timber frame',
+      'Plywood and MDF, painted',
+      'Octanorm-style hire system',
+      'Steel and aluminium fabrication',
+      'Tensioned fabric (imported via Dar es Salaam port, longer lead time)',
+    ],
+    regulations: {
+      authority: 'Fire and Rescue Force Act (Sheria ya Jeshi la Zimamoto na Uokoaji, 2007), and Dar es Salaam City Council event permitting',
+      exitWidthPer100Mm: 500,
+      minExitWidthMm: 1200,
+      maxTravelSingleMm: 15_000,
+      maxTravelDualMm: 40_000,
+      twoExitsAbove: 50,
+      minAisleMm: 3000,
+      standHeightLimitMm: 3500,
+      structuralSignOffAboveMm: 3500,
+      notes: [
+        'The Fire and Rescue Force Act requires unobstructed means of escape, alarm and detection provision for any building over 12 m or with 2,000 m² or more of floor area — confirmed, but the Act does not itself set a numeric width-per-occupant figure, so the numbers here are the same regional rule of thumb used across East Africa until the venue and the local Fire and Rescue Force station confirm otherwise.',
+        'Both a Fire and Rescue Force inspection and a Dar es Salaam City Council (or the relevant municipal council) event permit are typically required; the permit is usually the longer lead time of the two.',
+        'Power is TANESCO 230 V single-phase / 400 V three-phase, 50 Hz, Type D/G sockets — the same standard as the rest of the region — and load-shedding contingency (generator backup) is standard practice for anything client-facing.',
+        'Imported materials — SEG fabric, specialist hardware — come through the port of Dar es Salaam and carry duty plus a multi-week lead time; timber, vinyl and local fabrication are the default for anything on a normal event timeline.',
+      ],
+    },
+    costIndexBp: 6200,
+    // Mid-2026, roughly. TZS has drifted for years; re-check before quoting a real budget.
+    fxPerUsd: 2500,
   },
   {
     code: 'kenya',
     label: 'Kenya & East Africa',
-    countries: ['KE', 'TZ', 'UG', 'RW', 'ET'],
+    countries: ['KE', 'UG', 'RW', 'ET'],
     units: 'metric',
     currency: 'kes',
     voltage: 240,
@@ -138,6 +191,7 @@ export const REGION_PACKS: RegionPack[] = [
       ],
     },
     costIndexBp: 6800,
+    fxPerUsd: 129,
   },
   {
     code: 'uae',
@@ -176,6 +230,8 @@ export const REGION_PACKS: RegionPack[] = [
       ],
     },
     costIndexBp: 13_500,
+    // Pegged to the dollar since 1997; the one currency here this figure will not drift on.
+    fxPerUsd: 3.6725,
   },
   {
     code: 'india',
@@ -214,6 +270,7 @@ export const REGION_PACKS: RegionPack[] = [
       ],
     },
     costIndexBp: 5200,
+    fxPerUsd: 83,
   },
   {
     code: 'uk-eu',
@@ -251,6 +308,7 @@ export const REGION_PACKS: RegionPack[] = [
       ],
     },
     costIndexBp: 12_000,
+    fxPerUsd: 0.92,
   },
   {
     code: 'north-america',
@@ -289,6 +347,7 @@ export const REGION_PACKS: RegionPack[] = [
       ],
     },
     costIndexBp: 14_500,
+    fxPerUsd: 1,
   },
 ];
 

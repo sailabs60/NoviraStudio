@@ -291,7 +291,24 @@ async function main() {
 
   const priced = await call('GET', `/plans/${planId}/estimate?rateCardId=${cardId}`);
   check('a different card gives a different total', priced.data?.priced?.subtotal !== defaultTotal, `${priced.data?.priced?.subtotal} vs ${defaultTotal}`);
-  check('the Kenya card is cheaper than the UK default', priced.data?.priced?.subtotal < defaultTotal);
+  /*
+   * Both totals are real currency now, not the same USD-cent figure wearing a
+   * different label — Kenya's shillings are worth less per unit than the UK
+   * plan's euros by a factor of about 140, so the raw numbers alone say
+   * nothing about which is actually the cheaper quote. Dividing each back
+   * through its own region's fxPerUsd is the fair comparison: is the real
+   * value lower, not is the number of minor units lower.
+   */
+  const packs = await call('GET', '/regions');
+  const ukFx = (packs.data?.items ?? []).find((r) => r.code === 'uk-eu')?.fxPerUsd ?? 1;
+  const kenyaFx = (packs.data?.items ?? []).find((r) => r.code === 'kenya')?.fxPerUsd ?? 1;
+  const defaultUsd = defaultTotal / ukFx;
+  const kenyaUsd = (priced.data?.priced?.subtotal ?? 0) / kenyaFx;
+  check(
+    'the Kenya card is cheaper than the UK default, in real terms',
+    kenyaUsd < defaultUsd,
+    `${kenyaUsd.toFixed(2)} USD-equivalent vs ${defaultUsd.toFixed(2)}`
+  );
   check('margin is reported when costs are known', priced.data?.priced?.marginBp !== null);
 
   const boq = await fetch(`${BASE}/plans/${planId}/export/boq?format=json&prices=true&rateCardId=${cardId}`, {

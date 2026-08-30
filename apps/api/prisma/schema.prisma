@@ -39,7 +39,7 @@ model Company {
   venueGenerationAccess       String   @default("default") @map("venue_generation_access") @db.VarChar(16)
   stripeCustomerId            String?  @map("stripe_customer_id") @db.VarChar(64)
   /// Market this agency works in; drives truss stock, materials and rules.
-  regionCode                  String   @default("global") @map("region_code") @db.VarChar(24)
+  regionCode                  String   @default("tanzania") @map("region_code") @db.VarChar(24)
   /// White-label configuration. See shared/marketplace.ts for the shape.
   whiteLabel                  Json?    @map("white_label")
   whiteLabelEnabled           Boolean  @default(false) @map("white_label_enabled")
@@ -75,7 +75,7 @@ model User {
   phone                 String?   @db.VarChar(40)
   role                  String    @default("user") @db.VarChar(20)
   planTier              String    @default("free") @map("plan_tier") @db.VarChar(10)
-  preferredUnits        String    @default("imperial") @map("preferred_units") @db.VarChar(10)
+  preferredUnits        String    @default("metric") @map("preferred_units") @db.VarChar(10)
   appearance            String    @default("light") @db.VarChar(10)
   isEmailVerified       Boolean   @default(false) @map("is_email_verified")
   isBlocked             Boolean   @default(false) @map("is_blocked")
@@ -967,7 +967,7 @@ model RateCard {
   companyId       BigInt?  @map("company_id")
   name            String   @db.VarChar(180)
   currency        String   @default("usd") @db.VarChar(3)
-  regionCode      String   @default("global") @map("region_code") @db.VarChar(24)
+  regionCode      String   @default("tanzania") @map("region_code") @db.VarChar(24)
   /// Blanket uplift or discount applied to every line, in basis points.
   adjustmentBp    Int      @default(0) @map("adjustment_bp")
   /// Hourly crew rate in minor units.
@@ -1004,7 +1004,7 @@ model VenueSpec {
   spaceType    String    @default("ballroom") @map("space_type") @db.VarChar(24)
   city         String    @default("") @db.VarChar(120)
   country      String    @default("") @db.Char(2)
-  regionCode   String    @default("global") @map("region_code") @db.VarChar(24)
+  regionCode   String    @default("tanzania") @map("region_code") @db.VarChar(24)
   widthMm      Int       @map("width_mm")
   depthMm      Int       @map("depth_mm")
   areaSqM      Decimal   @default(0) @map("area_sq_m") @db.Decimal(10, 2)
@@ -1055,7 +1055,7 @@ model MarketplaceListing {
   previewUrl  String?  @map("preview_url") @db.VarChar(512)
   galleryUrls Json?    @map("gallery_urls")
   tags        Json?
-  regionCode  String   @default("global") @map("region_code") @db.VarChar(24)
+  regionCode  String   @default("tanzania") @map("region_code") @db.VarChar(24)
   /// The thing being sold: a scene, a set of objects, venue specs, a card.
   payload     Json
   status      String   @default("draft") @db.VarChar(12)
@@ -1113,7 +1113,7 @@ model Specialist {
   /// Day rate in minor units; null means "on application".
   dayRate       Int?     @map("day_rate")
   currency      String   @default("usd") @db.VarChar(3)
-  regionCode    String   @default("global") @map("region_code") @db.VarChar(24)
+  regionCode    String   @default("tanzania") @map("region_code") @db.VarChar(24)
   city          String   @default("") @db.VarChar(120)
   country       String   @default("") @db.Char(2)
   remote        Boolean  @default(true)

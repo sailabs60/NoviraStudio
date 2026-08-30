@@ -73,6 +73,44 @@ export function rateCardScope(user: AuthedUser) {
  * the same scope as everything else, so a card id copied from another
  * workspace resolves to nothing rather than leaking that workspace's pricing.
  */
+/**
+ * The built-in rate card, adapted for a market.
+ *
+ * Two separate corrections, and it matters that they stay separate. The
+ * built-in rates are US-cent figures:
+ *
+ *  · `fxPerUsd` fixes the *currency* — without it, 3,800 US cents relabelled
+ *    "TZS 3,800" is a real number in the wrong currency by a factor of about
+ *    2,500, not a price anyone could quote in shillings.
+ *  · `adjustmentBp` (set on the returned card) fixes the *level* — a plan in
+ *    Dar es Salaam or Nairobi priced at raw mid-market US rates is roughly
+ *    40–50 % too high even once the currency is right.
+ *
+ * Both are crude, and both are labelled as such in the UI: a starting point
+ * that tells the user to enter their own rates, not a claim to know local
+ * pricing or track FX. Shared by the take-off's own resolver and by "create a
+ * rate card seeded from this region" — a card built by either path should
+ * read the same.
+ */
+export function regionalDefaultRateCard(pack: ReturnType<typeof regionPack>): RateCard {
+  const card = defaultRateCard(pack.currency, pack.code);
+
+  if (pack.fxPerUsd !== 1) {
+    const fx = (minorUnits: number) => Math.round(minorUnits * pack.fxPerUsd);
+    card.lines = card.lines.map((line) => ({
+      ...line,
+      unitPrice: fx(line.unitPrice),
+      unitCost: line.unitCost != null ? fx(line.unitCost) : line.unitCost,
+      minimumCharge: line.minimumCharge != null ? fx(line.minimumCharge) : line.minimumCharge,
+    }));
+    card.crewRate = fx(card.crewRate);
+  }
+
+  card.adjustmentBp = pack.costIndexBp - 10_000;
+  card.name = pack.code === 'global' ? 'Novira default rates' : `Novira default rates (${pack.label})`;
+  return card;
+}
+
 export async function resolveRateCard(
   user: AuthedUser,
   opts: { preferredId?: number | null; regionCode?: string } = {}
@@ -106,18 +144,7 @@ export async function resolveRateCard(
   });
   if (anyOwned) return rateCardFromRow(anyOwned);
 
-  const pack = regionPack(region);
-  const card = defaultRateCard(pack.currency, pack.code);
-  /*
-   * Regional cost index. The built-in rates are mid-market US figures, so a
-   * plan in Nairobi priced against them is roughly 50 % too high. Applying the
-   * index as a blanket adjustment is crude and is labelled as such in the UI —
-   * it is a starting point that tells the user to enter their own rates, not a
-   * claim to know local pricing.
-   */
-  card.adjustmentBp = pack.costIndexBp - 10_000;
-  card.name = pack.code === 'global' ? 'Novira default rates' : `Novira default rates (${pack.label})`;
-  return card;
+  return regionalDefaultRateCard(regionPack(region));
 }
 
 export interface PlanEstimate {

@@ -33,7 +33,7 @@ import { ApiError } from '../lib/errors.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { requireAuth } from '../middleware/auth.js';
 import { loadPlanForUser } from './plans.js';
-import { estimatePlan, rateCardDto, rateCardScope } from '../services/estimator.js';
+import { estimatePlan, rateCardDto, rateCardScope, regionalDefaultRateCard } from '../services/estimator.js';
 
 export const estimateRouter = Router();
 estimateRouter.use(requireAuth);
@@ -335,7 +335,7 @@ estimateRouter.post(
     }
 
     const pack = regionPack(body.regionCode);
-    const card = defaultRateCard(pack.currency, pack.code);
+    const card = regionalDefaultRateCard(pack);
     const hasAny = await prisma.rateCard.count({ where: rateCardScope(user) });
 
     const row = await prisma.rateCard.create({

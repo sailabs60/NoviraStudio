@@ -791,7 +791,13 @@ export function createEmptyScene(units: UnitSystem = 'imperial'): SceneDocument 
     showGrid: true,
     snapToGrid: false,
     rotationSnapDeg: 10,
-    regionCode: 'global',
+    // This deployment is a single business's own tool rather than a
+    // multi-tenant product with users spread across markets, and that
+    // business is in Tanzania — so a new plan starts priced and specified
+    // for the market it is actually built in, rather than a generic global
+    // placeholder nobody there was asking for. A company with its own
+    // region set (see `Company.regionCode`) overrides this regardless.
+    regionCode: 'tanzania',
     rateCardId: null,
     render: { ...DEFAULT_RENDER_SETTINGS },
     walkthrough: { ...DEFAULT_WALKTHROUGH, shots: [] },
