@@ -22,6 +22,7 @@ import {
   type CameraShot,
   type SurfaceFinish,
   type SavedView,
+  type Vec3,
 } from '@novira/shared';
 import { createConstraint } from './factories';
 
@@ -157,6 +158,7 @@ interface EditorState {
   setTool: (tool: Tool) => void;
   setTransformMode: (mode: TransformMode) => void;
   setCameraMode: (mode: 'perspective' | 'top') => void;
+  setCameraPose: (pose: { positionMm: Vec3; targetMm: Vec3; fov: number }) => void;
   /**
    * Bumped when something wants the camera pulled back to show everything.
    *
@@ -512,6 +514,21 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ cameraMode });
     get().commitQuiet((draft) => {
       draft.camera.mode = cameraMode;
+    });
+  },
+
+  /**
+   * Remember where the camera is, so reopening this plan resumes the same
+   * view instead of the generic three-quarter default. Called after an orbit,
+   * pan, zoom or fly settles — not on every frame while one is in progress,
+   * which would flood the document with writes for a value nobody reads until
+   * the plan is reopened.
+   */
+  setCameraPose: (pose) => {
+    get().commitQuiet((draft) => {
+      draft.camera.positionMm = pose.positionMm;
+      draft.camera.targetMm = pose.targetMm;
+      draft.camera.fov = pose.fov;
     });
   },
 

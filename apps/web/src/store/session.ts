@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { SessionUser } from '@novira/shared';
-import { api, tokenStore } from '../lib/api';
+import { api, ApiClientError, tokenStore } from '../lib/api';
 
 interface SessionState {
   user: SessionUser | null;
@@ -38,8 +38,17 @@ export const useSession = create<SessionState>((set, get) => ({
       const user = await api.auth.me();
       applyTheme(user);
       set({ user, status: 'authenticated' });
-    } catch {
-      tokenStore.clear();
+    } catch (error) {
+      /*
+       * A stored token is only actually invalid on a 401 — the interceptor
+       * has already cleared it in that case. Anything else (the API waking
+       * up, a dropped connection, a request that timed out) is not proof the
+       * session is bad, and wiping the token here would sign someone out for
+       * the rest of the day over one slow request. Show them signed-out for
+       * now; the next successful load of `/auth/me` — including a plain
+       * refresh — logs them straight back in because the token is still there.
+       */
+      if (error instanceof ApiClientError && error.status === 401) tokenStore.clear();
       applyTheme(null);
       set({ user: null, status: 'anonymous' });
     }

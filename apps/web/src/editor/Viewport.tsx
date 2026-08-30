@@ -1192,6 +1192,51 @@ function CameraRig({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
   return null;
 }
 
+/**
+ * Resume wherever this plan's camera was left, instead of the generic
+ * three-quarter framing `CameraRig` gives a mode toggle.
+ *
+ * Keyed on `planId` rather than on the scene itself — the scene changes
+ * constantly as the plan is edited, and re-applying a stored camera position
+ * on every edit would fight the person currently dragging it. Opening a
+ * *different* plan is the one moment this should act, so a plan actually
+ * remembers where it was left rather than always opening on the same
+ * catalogue-default view.
+ */
+function CameraRestore({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
+  const { camera } = useThree();
+  const planId = useEditor((s) => s.planId);
+  const appliedFor = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (planId == null || appliedFor.current === planId) return;
+    appliedFor.current = planId;
+
+    const cam = useEditor.getState().scene.camera;
+    camera.position.set(mmToWorld(cam.positionMm.x), mmToWorld(cam.positionMm.y), mmToWorld(cam.positionMm.z));
+    const controls = orbitRef.current;
+    const targetWorld = new THREE.Vector3(
+      mmToWorld(cam.targetMm.x),
+      mmToWorld(cam.targetMm.y),
+      mmToWorld(cam.targetMm.z)
+    );
+    if (controls) {
+      controls.target.copy(targetWorld);
+      controls.update();
+    } else {
+      camera.lookAt(targetWorld);
+    }
+    const perspective = camera as THREE.PerspectiveCamera;
+    if (perspective.isPerspectiveCamera) {
+      perspective.fov = cam.fov || 50;
+      perspective.updateProjectionMatrix();
+    }
+    invalidate();
+  }, [planId, camera, orbitRef]);
+
+  return null;
+}
+
 const FLY_MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE']);
 const FLY_LOOK_SPEED = 0.0025;
 const FLY_SPEED = 6;
@@ -1242,6 +1287,8 @@ function FlyNavigation({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
           /* already released */
         }
       }
+      const cam = currentCamera();
+      if (cam) useEditor.getState().setCameraPose(cam);
       invalidate();
     };
 
@@ -1374,6 +1421,7 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
   return (
     <>
       <CameraRig orbitRef={orbitRef} />
+      <CameraRestore orbitRef={orbitRef} />
       <CaptureBridge />
       <FrameKeepAlive />
       <FloorDragBridge orbitRef={orbitRef} />
@@ -1503,6 +1551,10 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
         minDistance={1}
         maxDistance={200}
         onStart={() => useEditor.getState().markCameraTouched()}
+        onEnd={() => {
+          const cam = currentCamera();
+          if (cam) useEditor.getState().setCameraPose(cam);
+        }}
       />
 
       <GizmoHelper alignment="bottom-right" margin={[64, 64]}>
