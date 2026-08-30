@@ -66,8 +66,14 @@ export function CreatePanel() {
         scope is legible at a glance — and only one body is mounted, so it is
         never a wall of controls.
       */}
-      <div className="shrink-0 border-b border-line p-2">
-        <div className="grid grid-cols-3 gap-1">
+      {/*
+        One row, not a stack of three icon tiles. The taller version cost
+        about 30 px of height to say exactly the same thing a single row
+        says — and that is 30 px taken from the asset grid on every panel
+        open, on the two panels people spend the most time in.
+      */}
+      <div className="shrink-0 border-b border-line p-1.5">
+        <div className="ed-segment w-full">
           {GROUPS.map((entry) => {
             const Icon = entry.icon;
             const active = group === entry.key;
@@ -78,14 +84,12 @@ export function CreatePanel() {
                 onClick={() => setGroup(entry.key)}
                 title={entry.note}
                 aria-pressed={active}
-                className={`flex flex-col items-center gap-1 rounded-lg border px-1 py-2 text-[10px] font-semibold leading-tight transition ${
-                  active
-                    ? 'border-primary/40 bg-primary-soft text-primary'
-                    : 'border-transparent text-ink-muted hover:bg-surface-muted hover:text-ink'
+                className={`ed-segment-btn flex flex-1 items-center justify-center gap-1 whitespace-nowrap ${
+                  active ? 'ed-segment-btn-active' : ''
                 }`}
               >
-                <Icon className="h-4 w-4" />
-                <span className="text-center">{entry.label}</span>
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                {entry.label}
               </button>
             );
           })}
@@ -102,7 +106,10 @@ export function CreatePanel() {
 /* ── 3D models ─────────────────────────────────────────────────────────── */
 
 function ModelsGroup() {
-  const [tab, setTab] = useState<'catalogue' | 'online' | 'mine'>('catalogue');
+  // Online first: eighteen libraries dwarf the measured catalogue, and the
+  // ask most people bring here — "find me a chair" — is served better by
+  // a wall of real photography than by the smaller curated set.
+  const [tab, setTab] = useState<'catalogue' | 'online' | 'mine'>('online');
 
   return (
     <div className="flex h-full min-h-0 flex-col">

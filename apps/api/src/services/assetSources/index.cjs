@@ -55,11 +55,16 @@ const scoreByProjectFit = (asset) => {
     return PROJECT_FOCUS_TAGS.reduce((acc, tag) => (bag.includes(tag) ? acc + 1 : acc), 0);
 };
 
+/** Free and droppable in first, a purchase or an account last. */
+const ACCESS_TIER_RANK = { free_download: 0, licensed: 1, requires_purchase: 2, external_only: 3 };
+
 const sortWithinSource = (a, b) => {
     const relevanceDiff = (b.queryRelevanceScore || 0) - (a.queryRelevanceScore || 0);
     if (relevanceDiff !== 0) return relevanceDiff;
     const scoreDiff = b.projectFitScore - a.projectFitScore;
     if (scoreDiff !== 0) return scoreDiff;
+    const tierDiff = (ACCESS_TIER_RANK[a.accessTier] ?? 1) - (ACCESS_TIER_RANK[b.accessTier] ?? 1);
+    if (tierDiff !== 0) return tierDiff;
     const loadDiff = Number(b.loadableInScene) - Number(a.loadableInScene);
     if (loadDiff !== 0) return loadDiff;
     return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
@@ -235,12 +240,21 @@ const rankResults = (assets, query) => {
     /*
      * Who leads each round.
      *
+     * The image sources are ordered by what the picture is *for*: creative
+     * reference work — a mood, a stand that looks like this, a lighting idea
+     * — is what Pinterest is unmatched at, and it is the source designers ask
+     * for by name. The stock libraries follow, since they are the better
+     * answer for "a photograph of a chair".
+     *
      * The 3D sources are ordered by how likely their result is to be usable in
-     * a scene. The image sources are ordered by what the picture is *for*:
-     * creative reference work — a mood, a stand that looks like this, a
-     * lighting idea — is what Pinterest is unmatched at, and it is the source
-     * designers ask for by name. The stock libraries follow, since they are
-     * the better answer for "a photograph of a chair".
+     * a scene *without an account* — this had drifted out of sync with that
+     * stated intent: BlenderKit and Sketchfab sat ahead of Poly Haven and the
+     * rest, so the first row a designer saw was a subscription badge and a
+     * "Requires Purchase" lock, with the free CC0 chair that actually drops
+     * straight into the plan a scroll further down. Free-and-keyless now leads;
+     * the two sources that gate a download behind an account or a purchase are
+     * last, not first — someone can still reach them, they are just no longer
+     * what greets a search.
      */
     const SOURCE_ROUND_ROBIN_PRIORITY = [
         'pinterest',
@@ -248,13 +262,13 @@ const rankResults = (assets, query) => {
         'pexels',
         'pixabay',
         'openverse',
-        'blenderkit',
-        'sketchfab',
         'polyhaven',
-        'polypizza',
         'opensource3d',
         'khronos',
+        'polypizza',
         'ambientcg',
+        'blenderkit',
+        'sketchfab',
     ];
     const byPriority = (x, y) => {
         const px = SOURCE_ROUND_ROBIN_PRIORITY.indexOf(x);

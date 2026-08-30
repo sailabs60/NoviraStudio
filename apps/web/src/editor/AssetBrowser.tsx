@@ -110,7 +110,7 @@ export function AssetBrowser({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* ── Search ─────────────────────────────────────────────────── */}
-      <div className="shrink-0 px-3 pb-2 pt-2.5">
+      <div className="shrink-0 px-3 pb-1.5 pt-2">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-subtle" />
           <input
@@ -135,7 +135,7 @@ export function AssetBrowser({
 
       {/* ── Shelves ────────────────────────────────────────────────── */}
       {shelves.length && !search.trim() ? (
-        <div className="shrink-0 pb-2">
+        <div className="shrink-0 pb-1.5">
           <div className="nv-no-scrollbar flex gap-1.5 overflow-x-auto px-3 pb-0.5">
             {shelves.map((entry) => (
               <button
@@ -155,7 +155,7 @@ export function AssetBrowser({
       ) : null}
 
       {/* ── Count ──────────────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center gap-2 px-3 pb-1.5 text-[10px] text-ink-subtle">
+      <div className="flex shrink-0 items-center gap-2 px-3 pb-1 text-[10px] text-ink-subtle">
         {feed.isLoading ? (
           <span className="flex items-center gap-1">
             <Loader2 className="h-3 w-3 animate-spin" /> Searching the libraries…
@@ -401,8 +401,17 @@ function FeedError({ onRetry }: { onRetry: () => void }) {
 }
 
 function gridFor(category: AssetCategory): string {
-  // Images get a tighter, taller grid: they are scanned, not read.
-  return category === 'images' ? 'grid grid-cols-2 gap-1.5' : 'grid grid-cols-2 gap-1.5';
+  /*
+   * Models keep two wide columns: a card's name, real dimensions, source and
+   * licence are text someone reads before dragging one in, and three columns
+   * of that reads as a list with extra steps.
+   *
+   * Materials, HDRIs and images are the opposite case — a swatch or a
+   * reference photo is *scanned*, not read, and the panel is now wide enough
+   * to give three of them a fair size each. More on screen without scrolling
+   * is the entire point of a "wider area for the assets".
+   */
+  return category === 'models' ? 'grid grid-cols-2 gap-1.5' : 'grid grid-cols-3 gap-1.5';
 }
 
 function placeholderFor(category: AssetCategory): string {

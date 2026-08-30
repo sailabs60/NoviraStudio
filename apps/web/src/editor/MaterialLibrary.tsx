@@ -32,7 +32,10 @@ import { toast } from '../components/ui';
  * shelf a material came from.
  */
 export function MaterialLibrary() {
-  const [tab, setTab] = useState<'included' | 'online'>('included');
+  // Scanned (online) first — the same reasoning as the model browser: a
+  // photographic library outnumbers the built-in seventy by orders of
+  // magnitude, and it is what "find me a terrazzo" actually wants.
+  const [tab, setTab] = useState<'included' | 'online'>('online');
 
   return (
     <div className="flex h-full min-h-0 flex-col">

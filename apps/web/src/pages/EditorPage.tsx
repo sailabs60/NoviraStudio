@@ -295,7 +295,7 @@ function WorkPanelHost({ onClose }: { onClose: () => void }) {
 
   if (tool === 'wall' || tool === 'draw') {
     return (
-      <aside className="ed-panel w-[320px] shrink-0 overflow-y-auto border-r" aria-label="Drawing tool">
+      <aside className="ed-panel w-[368px] shrink-0 overflow-y-auto border-r" aria-label="Drawing tool">
         {tool === 'wall' ? <WallPanel /> : <DraftPanel />}
       </aside>
     );
@@ -303,7 +303,7 @@ function WorkPanelHost({ onClose }: { onClose: () => void }) {
 
   return (
     <aside
-      className="ed-panel flex w-[320px] shrink-0 flex-col overflow-hidden border-r"
+      className="ed-panel flex w-[368px] shrink-0 flex-col overflow-hidden border-r"
       aria-label="Work panel"
     >
       <PanelHeader panel={workPanel} onClose={onClose} />
