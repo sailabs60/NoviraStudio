@@ -1,0 +1,1164 @@
+// Novira — MySQL schema.
+//
+// Conventions:
+//  · every linear dimension is an integer number of millimetres, suffixed _mm
+//  · money is integer minor units (cents), matching Stripe
+//  · the plan scene is one JSON document, not normalised rows
+//  · credits are an append-only ledger; user.credits_remaining is a cache
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+/**
+ * ── Tenancy & identity ───────────────────────────────────────────────
+ */
+
+model Company {
+  id                          BigInt   @id @default(autoincrement())
+  name                        String   @db.VarChar(160)
+  mainEmail                   String?  @map("main_email") @db.VarChar(255)
+  phone                       String?  @db.VarChar(40)
+  addressLine                 String?  @map("address_line") @db.VarChar(255)
+  city                        String?  @db.VarChar(120)
+  country                     String?  @db.Char(2)
+  postalCode                  String?  @map("postal_code") @db.VarChar(20)
+  logoUrl                     String?  @map("logo_url") @db.VarChar(512)
+  creditMode                  String   @default("per_user") @map("credit_mode") @db.VarChar(16)
+  pendingCreditMode           String?  @map("pending_credit_mode") @db.VarChar(16)
+  poolBalance                 Int      @default(0) @map("pool_balance")
+  globalModelsEnabled         Boolean  @default(true) @map("global_models_enabled")
+  globalTexturesEnabled       Boolean  @default(true) @map("global_textures_enabled")
+  companyAdminCanManageAssets Boolean  @default(false) @map("company_admin_can_manage_assets")
+  aiImageTo3dEnabled          Boolean  @default(true) @map("ai_image_to_3d_enabled")
+  venueGenerationAccess       String   @default("default") @map("venue_generation_access") @db.VarChar(16)
+  stripeCustomerId            String?  @map("stripe_customer_id") @db.VarChar(64)
+  /// Market this agency works in; drives truss stock, materials and rules.
+  regionCode                  String   @default("global") @map("region_code") @db.VarChar(24)
+  /// White-label configuration. See shared/marketplace.ts for the shape.
+  whiteLabel                  Json?    @map("white_label")
+  whiteLabelEnabled           Boolean  @default(false) @map("white_label_enabled")
+  /// Feature switches for the production layer, mirroring the AI ones above.
+  marketplaceEnabled          Boolean  @default(true) @map("marketplace_enabled")
+  specialistsEnabled          Boolean  @default(true) @map("specialists_enabled")
+  isActive                    Boolean  @default(true) @map("is_active")
+  createdAt                   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  users        User[]
+  members      CompanyMember[]
+  projects     Project[]
+  catalogItems CatalogItem[]
+  textures     TextureAsset[]
+  ledger       CreditLedger[]
+  rateCards    RateCard[]
+  venueSpecs   VenueSpec[]
+
+  @@map("company")
+}
+
+model User {
+  id                    BigInt    @id @default(autoincrement())
+  companyId             BigInt?   @map("company_id")
+  email                 String    @unique @db.VarChar(255)
+  passwordHash          String?   @map("password_hash") @db.VarChar(255)
+  googleSub             String?   @unique @map("google_sub") @db.VarChar(64)
+  stripeCustomerId      String?   @unique @map("stripe_customer_id") @db.VarChar(64)
+  firstName             String    @map("first_name") @db.VarChar(60)
+  lastName              String    @map("last_name") @db.VarChar(60)
+  displayName           String?   @map("display_name") @db.VarChar(120)
+  phone                 String?   @db.VarChar(40)
+  role                  String    @default("user") @db.VarChar(20)
+  planTier              String    @default("free") @map("plan_tier") @db.VarChar(10)
+  preferredUnits        String    @default("imperial") @map("preferred_units") @db.VarChar(10)
+  appearance            String    @default("light") @db.VarChar(10)
+  isEmailVerified       Boolean   @default(false) @map("is_email_verified")
+  isBlocked             Boolean   @default(false) @map("is_blocked")
+  marketingOptIn        Boolean   @default(false) @map("marketing_opt_in")
+  onboardingRoleId      BigInt?   @map("onboarding_role_id")
+  onboardingDesignIds   Json?     @map("onboarding_design_ids")
+  onboardingCompletedAt DateTime? @map("onboarding_completed_at") @db.DateTime(3)
+  creditsRemaining      Int       @default(0) @map("credits_remaining")
+  monthlyCreditQuota    Int       @default(0) @map("monthly_credit_quota")
+  createdAt             DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  company            Company?              @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  projects           Project[]
+  plans              Plan[]
+  ledger             CreditLedger[]
+  subscriptions      Subscription[]
+  aiJobs             AiJob[]
+  templates          Template[]
+  collections        Collection[]
+  catalogItems       CatalogItem[]
+  tokens             AuthToken[]
+  memberships        CompanyMember[]
+  venues             Venue[]
+  events             AnalyticsEvent[]
+  planRequests       SubscriptionRequest[]
+  rateCards          RateCard[]
+  venueSpecs         VenueSpec[]
+  planVersions       PlanVersion[]
+  planComments       PlanComment[]
+  listings           MarketplaceListing[]
+  purchases          MarketplacePurchase[]
+  specialist         Specialist?
+  specialistRequests SpecialistRequest[]
+
+  @@index([companyId])
+  @@index([planTier, isBlocked])
+  @@map("user")
+}
+
+model AuthToken {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt    @map("user_id")
+  token     String    @unique @db.VarChar(64)
+  purpose   String    @db.VarChar(24) // email_verify | password_reset
+  expiresAt DateTime  @map("expires_at") @db.DateTime(3)
+  usedAt    DateTime? @map("used_at") @db.DateTime(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@map("auth_token")
+}
+
+model CompanyMember {
+  id                  BigInt    @id @default(autoincrement())
+  companyId           BigInt    @map("company_id")
+  userId              BigInt?   @map("user_id")
+  invitedEmail        String    @map("invited_email") @db.VarChar(255)
+  role                String    @default("member") @db.VarChar(16)
+  visibility          String    @default("own_only") @db.VarChar(16)
+  seatPlanTier        String    @map("seat_plan_tier") @db.VarChar(10)
+  status              String    @db.VarChar(20)
+  invitationToken     String?   @unique @map("invitation_token") @db.VarChar(64)
+  invitationExpiresAt DateTime? @map("invitation_expires_at") @db.DateTime(3)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, invitedEmail])
+  @@index([userId])
+  @@map("company_member")
+}
+
+/**
+ * ── Projects, plans, scenes ──────────────────────────────────────────
+ */
+
+model Project {
+  id          BigInt   @id @default(autoincrement())
+  ownerId     BigInt   @map("owner_id")
+  companyId   BigInt?  @map("company_id")
+  title       String   @db.VarChar(180)
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  owner              User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  company            Company?            @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  plans              Plan[]
+  guests             Guest[]
+  proposals          Proposal[]
+  specialistRequests SpecialistRequest[]
+
+  @@index([ownerId, updatedAt])
+  @@index([companyId])
+  @@map("project")
+}
+
+model Plan {
+  id             BigInt   @id @default(autoincrement())
+  projectId      BigInt   @map("project_id")
+  ownerId        BigInt   @map("owner_id")
+  title          String   @db.VarChar(180)
+  editorType     String   @default("3d") @map("editor_type") @db.VarChar(4)
+  units          String   @db.VarChar(10)
+  startInTopView Boolean  @default(false) @map("start_in_top_view")
+  previewUrl     String?  @map("preview_url") @db.VarChar(512)
+  isReadOnly     Boolean  @default(false) @map("is_read_only")
+  objectCount    Int      @default(0) @map("object_count")
+  createdAt      DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  project              Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  owner                User                  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  scene                PlanScene?
+  shares               PlanShare[]
+  renders              AiRender[]
+  jobs                 AiJob[]
+  seatAssignments      SeatAssignment[]
+  inventoryAllocations InventoryAllocation[]
+  versions             PlanVersion[]
+  comments             PlanComment[]
+
+  @@index([projectId, updatedAt])
+  @@index([ownerId])
+  @@map("plan")
+}
+
+model PlanScene {
+  planId        BigInt   @id @map("plan_id")
+  schemaVersion Int      @default(1) @map("schema_version") @db.SmallInt
+  scene         Json
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@map("plan_scene")
+}
+
+model PlanShare {
+  id        BigInt    @id @default(autoincrement())
+  planId    BigInt    @map("plan_id")
+  token     String    @unique @db.VarChar(48)
+  mode      String    @default("view") @db.VarChar(8)
+  expiresAt DateTime? @map("expires_at") @db.DateTime(3)
+  revokedAt DateTime? @map("revoked_at") @db.DateTime(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+  @@map("plan_share")
+}
+
+/**
+ * ── Catalogue & textures ─────────────────────────────────────────────
+ */
+
+model CatalogCategory {
+  id        BigInt @id @default(autoincrement())
+  slug      String @unique @db.VarChar(140)
+  name      String @db.VarChar(120)
+  sortOrder Int    @default(0) @map("sort_order")
+
+  items CatalogItem[]
+
+  @@map("catalog_category")
+}
+
+model CatalogItem {
+  id                    BigInt  @id @default(autoincrement())
+  categoryId            BigInt  @map("category_id")
+  companyId             BigInt? @map("company_id")
+  ownerId               BigInt? @map("owner_id")
+  scope                 String  @default("global") @db.VarChar(10)
+  name                  String  @db.VarChar(180)
+  description           String? @db.Text
+  modelUrl              String  @map("model_url") @db.VarChar(512)
+  previewImage          String? @map("preview_image") @db.VarChar(512)
+  widthMm               Int?    @map("width_mm")
+  depthMm               Int?    @map("depth_mm")
+  heightMm              Int?    @map("height_mm")
+  diameterMm            Int?    @map("diameter_mm")
+  tableShape            String? @map("table_shape") @db.VarChar(16)
+  seatsDefault          Int?    @map("seats_default") @db.SmallInt
+  isFreePlanAvailable   Boolean @default(false) @map("is_free_plan_available")
+  defaultMaterialId     String? @map("default_material_id") @db.VarChar(120)
+  materialColorConfig   Json?   @map("material_color_config")
+  textureVariationCount Int     @default(0) @map("texture_variation_count") @db.SmallInt
+  isActive              Boolean @default(true) @map("is_active")
+  reviewStatus          String  @default("approved") @map("review_status") @db.VarChar(12)
+
+  // Provenance from the online asset pipeline.
+  sourceKey     String? @map("source_key") @db.VarChar(40)
+  sourceLabel   String? @map("source_label") @db.VarChar(80)
+  sourceAssetId String? @map("source_asset_id") @db.VarChar(160)
+  license       String? @db.VarChar(80)
+  attribution   String? @db.VarChar(400)
+  sourceUrl     String? @map("source_url") @db.VarChar(512)
+  triangleCount Int?    @map("triangle_count")
+
+  // Verification — see services/assetVerification.
+  verifiedAt        DateTime? @map("verified_at") @db.DateTime(3)
+  verificationScore Int?      @map("verification_score") @db.SmallInt
+  verificationNotes Json?     @map("verification_notes")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  category   CatalogCategory           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  company    Company?                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  owner      User?                     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  variations CatalogTextureVariation[]
+
+  @@index([categoryId, isActive])
+  @@index([scope, companyId])
+  @@index([sourceKey, sourceAssetId])
+  @@map("catalog_item")
+}
+
+model CatalogTextureVariation {
+  id            BigInt  @id @default(autoincrement())
+  catalogItemId BigInt  @map("catalog_item_id")
+  name          String  @db.VarChar(140)
+  materialId    String  @map("material_id") @db.VarChar(120)
+  textureUrl    String  @map("texture_url") @db.VarChar(512)
+  isDefault     Boolean @default(false) @map("is_default")
+
+  item CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+
+  @@index([catalogItemId])
+  @@map("catalog_texture_variation")
+}
+
+model TextureCategory {
+  id   BigInt @id @default(autoincrement())
+  slug String @unique @db.VarChar(140)
+  name String @db.VarChar(120)
+
+  assets TextureAsset[]
+
+  @@map("texture_category")
+}
+
+model TextureAsset {
+  id          BigInt   @id @default(autoincrement())
+  categoryId  BigInt   @map("category_id")
+  companyId   BigInt?  @map("company_id")
+  name        String   @db.VarChar(160)
+  description String   @db.VarChar(400)
+  imageUrl    String   @map("image_url") @db.VarChar(512)
+  maps        Json?
+  pbrEnabled  Boolean  @default(false) @map("pbr_enabled")
+  tileSizeM   Decimal? @map("tile_size_m") @db.Decimal(6, 3)
+  sourceKey   String?  @map("source_key") @db.VarChar(40)
+  license     String?  @db.VarChar(80)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  category TextureCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  company  Company?        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId, companyId])
+  @@map("texture_asset")
+}
+
+/**
+ * ── Templates, collections, venues ───────────────────────────────────
+ */
+
+model Template {
+  id          BigInt   @id @default(autoincrement())
+  ownerId     BigInt?  @map("owner_id")
+  scope       String   @default("local") @db.VarChar(8)
+  title       String   @db.VarChar(180)
+  description String?  @db.Text
+  snapshot    Json
+  previewUrl  String?  @map("preview_url") @db.VarChar(512)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  owner User? @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([scope])
+  @@index([ownerId])
+  @@map("template")
+}
+
+model Collection {
+  id           BigInt   @id @default(autoincrement())
+  ownerId      BigInt   @map("owner_id")
+  name         String   @db.VarChar(180)
+  objects      Json
+  objectCount  Int      @map("object_count")
+  summary      String?  @db.VarChar(300)
+  previewUrl   String?  @map("preview_url") @db.VarChar(512)
+  sourcePlanId BigInt?  @map("source_plan_id")
+  createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@map("collection")
+}
+
+model Venue {
+  id          BigInt   @id @default(autoincrement())
+  ownerId     BigInt?  @map("owner_id")
+  companyId   BigInt?  @map("company_id")
+  scope       String   @default("personal") @db.VarChar(10)
+  name        String   @db.VarChar(180)
+  assetUrl    String   @map("asset_url") @db.VarChar(512)
+  previewUrl  String?  @map("preview_url") @db.VarChar(512)
+  sourceRunId String?  @map("source_run_id") @db.VarChar(36)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  owner User? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([ownerId])
+  @@map("venue")
+}
+
+/**
+ * ── Credits, billing ─────────────────────────────────────────────────
+ */
+
+model CreditLedger {
+  id           BigInt    @id @default(autoincrement())
+  userId       BigInt    @map("user_id")
+  companyId    BigInt?   @map("company_id")
+  delta        Int
+  reason       String    @db.VarChar(24)
+  featureCode  String?   @map("feature_code") @db.VarChar(48)
+  aiJobId      String?   @map("ai_job_id") @db.VarChar(36)
+  expiresAt    DateTime? @map("expires_at") @db.DateTime(3)
+  balanceAfter Int       @map("balance_after")
+  note         String?   @db.VarChar(255)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([featureCode, createdAt])
+  @@map("credit_ledger")
+}
+
+model CreditRatio {
+  featureCode String  @id @map("feature_code") @db.VarChar(48)
+  label       String  @db.VarChar(120)
+  description String? @db.VarChar(400)
+  credits     Int
+  isActive    Boolean @default(true) @map("is_active")
+
+  @@map("credit_ratio")
+}
+
+model CreditPack {
+  id            BigInt  @id @default(autoincrement())
+  creditAmount  Int     @map("credit_amount")
+  unitAmount    Int     @map("unit_amount")
+  currency      String  @default("usd") @db.VarChar(3)
+  stripePriceId String? @map("stripe_price_id") @db.VarChar(64)
+  expiryDays    Int?    @map("expiry_days")
+  isActive      Boolean @default(true) @map("is_active")
+  displayOrder  Int     @default(0) @map("display_order")
+
+  @@map("credit_pack")
+}
+
+model PlanPrice {
+  tier           String  @id @db.VarChar(10)
+  marketingName  String  @map("marketing_name") @db.VarChar(60)
+  tagline        String  @db.VarChar(240)
+  unitAmount     Int     @map("unit_amount")
+  currency       String  @default("usd") @db.VarChar(3)
+  monthlyCredits Int     @map("monthly_credits")
+  features       Json
+  highlight      Boolean @default(false)
+  stripePriceId  String? @map("stripe_price_id") @db.VarChar(64)
+  isActive       Boolean @default(true) @map("is_active")
+
+  @@map("plan_price")
+}
+
+model Subscription {
+  id                       BigInt    @id @default(autoincrement())
+  userId                   BigInt?   @map("user_id")
+  companyId                BigInt?   @map("company_id")
+  planTier                 String    @map("plan_tier") @db.VarChar(10)
+  billingSource            String    @default("stripe") @map("billing_source") @db.VarChar(10)
+  stripeSubscriptionId     String?   @map("stripe_subscription_id") @db.VarChar(64)
+  stripeSubscriptionStatus String?   @map("stripe_subscription_status") @db.VarChar(32)
+  billingCycleAnchor       DateTime? @map("billing_cycle_anchor") @db.DateTime(3)
+  cycleEndsAt              DateTime? @map("cycle_ends_at") @db.DateTime(3)
+  monthlyCreditQuota       Int       @default(0) @map("monthly_credit_quota")
+  cancelAtPeriodEnd        Boolean   @default(false) @map("cancel_at_period_end")
+  cancellationReasonId     BigInt?   @map("cancellation_reason_id")
+  cancellationNote         String?   @map("cancellation_note") @db.Text
+  createdAt                DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("subscription")
+}
+
+model CancellationReason {
+  id           BigInt  @id @default(autoincrement())
+  label        String  @db.VarChar(200)
+  requiresNote Boolean @default(false) @map("requires_note")
+  sortOrder    Int     @default(0) @map("sort_order")
+  isActive     Boolean @default(true) @map("is_active")
+
+  @@map("cancellation_reason")
+}
+
+model SubscriptionRequest {
+  id            BigInt    @id @default(autoincrement())
+  userId        BigInt    @map("user_id")
+  requestedPlan String    @map("requested_plan") @db.VarChar(10)
+  status        String    @default("pending") @db.VarChar(12)
+  note          String?   @db.Text
+  requestedAt   DateTime  @default(now()) @map("requested_at") @db.DateTime(3)
+  decidedAt     DateTime? @map("decided_at") @db.DateTime(3)
+  decidedBy     BigInt?   @map("decided_by")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, requestedAt])
+  @@map("subscription_request")
+}
+
+/**
+ * ── AI jobs & renders ────────────────────────────────────────────────
+ */
+
+model AiJob {
+  id                  String    @id @db.VarChar(36)
+  userId              BigInt    @map("user_id")
+  companyId           BigInt?   @map("company_id")
+  planId              BigInt?   @map("plan_id")
+  projectId           BigInt?   @map("project_id")
+  processType         String    @map("process_type") @db.VarChar(32)
+  provider            String?   @db.VarChar(64)
+  providerModel       String?   @map("provider_model") @db.VarChar(64)
+  status              String    @db.VarChar(16)
+  progress            Int       @default(0) @db.TinyInt
+  idempotencyKey      String    @map("idempotency_key") @db.VarChar(80)
+  creditsCharged      Int       @default(0) @map("credits_charged")
+  inputPayload        Json?     @map("input_payload")
+  outputPayload       Json?     @map("output_payload")
+  sourceImageFilename String?   @map("source_image_filename") @db.VarChar(255)
+  errorCode           String?   @map("error_code") @db.VarChar(64)
+  errorMessage        String?   @map("error_message") @db.Text
+  createdAt           DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+  completedAt         DateTime? @map("completed_at") @db.DateTime(3)
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan Plan? @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, idempotencyKey])
+  @@index([processType, status, createdAt])
+  @@index([userId, createdAt])
+  @@map("ai_job")
+}
+
+model AiRender {
+  id         BigInt   @id @default(autoincrement())
+  planId     BigInt   @map("plan_id")
+  jobId      String   @map("job_id") @db.VarChar(36)
+  prompt     String?  @db.Text
+  model      String?  @db.VarChar(64)
+  previewUrl String?  @map("preview_url") @db.VarChar(512)
+  mediaUrl   String   @map("media_url") @db.VarChar(512)
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId, createdAt])
+  @@map("ai_render")
+}
+
+/**
+ * ── Uploads, onboarding, theme, analytics ────────────────────────────
+ */
+
+model Upload {
+  fileKey     String   @id @map("file_key") @db.VarChar(64)
+  ownerId     BigInt?  @map("owner_id")
+  contentType String   @map("content_type") @db.VarChar(120)
+  size        Int
+  purpose     String   @db.VarChar(32)
+  url         String   @db.VarChar(512)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([ownerId])
+  @@map("upload")
+}
+
+model OnboardingOption {
+  id        BigInt  @id @default(autoincrement())
+  section   Int     @db.TinyInt
+  label     String  @db.VarChar(160)
+  sortOrder Int     @default(0) @map("sort_order")
+  isActive  Boolean @default(true) @map("is_active")
+
+  @@index([section, sortOrder])
+  @@map("onboarding_option")
+}
+
+model OnboardingTemplateAssignment {
+  id                BigInt @id @default(autoincrement())
+  section1OptionId  BigInt @map("section_1_option_id")
+  section2Signature String @map("section_2_signature") @db.VarChar(190)
+  templateId        BigInt @map("template_id")
+
+  @@unique([section1OptionId, section2Signature])
+  @@map("onboarding_template_assignment")
+}
+
+model ThemePreset {
+  id       BigInt  @id @default(autoincrement())
+  name     String  @db.VarChar(80)
+  tokens   Json
+  isActive Boolean @default(false) @map("is_active")
+
+  @@map("theme_preset")
+}
+
+model AnalyticsEvent {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt?  @map("user_id")
+  anonymousId String?  @map("anonymous_id") @db.VarChar(64)
+  name        String   @db.VarChar(80)
+  props       Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([name, createdAt])
+  @@index([userId, createdAt])
+  @@map("analytics_event")
+}
+
+model GuestSession {
+  id            String   @id @db.VarChar(36)
+  name          String   @db.VarChar(120)
+  email         String   @db.VarChar(255)
+  backgroundUrl String?  @map("background_url") @db.VarChar(512)
+  camera        Json?
+  scene         Json?
+  expiresAt     DateTime @map("expires_at") @db.DateTime(3)
+  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([expiresAt])
+  @@map("guest_session")
+}
+
+/// One row per Stripe event we have already applied. Stripe retries deliveries
+/// until it gets a 2xx, so the handler must be idempotent; this is the guard.
+model StripeEvent {
+  id        String   @id @db.VarChar(64)
+  type      String   @db.VarChar(80)
+  payload   Json?
+  handledAt DateTime @default(now()) @map("handled_at") @db.DateTime(3)
+
+  @@index([type, handledAt])
+  @@map("stripe_event")
+}
+
+/// Artwork kept in a planner's brand library — a client logo, a monogram, a
+/// sponsor mark — so it can be reused across plans without re-importing. The
+/// licence and credit line travel with it into proposals.
+model BrandAsset {
+  id          BigInt   @id @default(autoincrement())
+  ownerId     BigInt?  @map("owner_id")
+  companyId   BigInt?  @map("company_id")
+  name        String   @db.VarChar(180)
+  imageUrl    String   @map("image_url") @db.VarChar(512)
+  widthPx     Int      @map("width_px")
+  heightPx    Int      @map("height_px")
+  license     String?  @db.VarChar(40)
+  attribution String?  @db.VarChar(400)
+  sourceUrl   String?  @map("source_url") @db.VarChar(512)
+  sourceLabel String?  @map("source_label") @db.VarChar(80)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([ownerId, createdAt])
+  @@index([companyId])
+  @@map("brand_asset")
+}
+
+/**
+ * ── Guest list and seating ───────────────────────────────────────────────
+ * Guests belong to the project, not the plan: an event has one guest list, but
+ * a planner will usually try several layouts for it. Seating is therefore a
+ * separate row per plan, so two seating charts can exist side by side without
+ * either one owning the guest.
+ */
+
+model Guest {
+  id            BigInt   @id @default(autoincrement())
+  projectId     BigInt   @map("project_id")
+  firstName     String   @map("first_name") @db.VarChar(80)
+  lastName      String   @map("last_name") @db.VarChar(80)
+  email         String?  @db.VarChar(255)
+  phone         String?  @db.VarChar(40)
+  /// Household or booking group — the people who must sit together.
+  partyName     String?  @map("party_name") @db.VarChar(120)
+  /// Free-form grouping: bride, groom, sales team, row 3.
+  guestGroup    String?  @map("guest_group") @db.VarChar(80)
+  rsvp          String   @default("pending") @db.VarChar(12)
+  mealChoice    String?  @map("meal_choice") @db.VarChar(80)
+  /// Allergies and dietary requirements, printed on the kitchen sheet.
+  dietary       String?  @db.Text
+  /// Step-free access, hearing loop, service animal — drives table placement.
+  accessibility String?  @db.Text
+  isChild       Boolean  @default(false) @map("is_child")
+  /// A supplier who needs feeding but not a guest seat.
+  isVendorGuest Boolean  @default(false) @map("is_vendor_guest")
+  notes         String?  @db.Text
+  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignments SeatAssignment[]
+
+  @@index([projectId, lastName])
+  @@index([projectId, rsvp])
+  @@map("guest")
+}
+
+model SeatAssignment {
+  id            BigInt   @id @default(autoincrement())
+  planId        BigInt   @map("plan_id")
+  guestId       BigInt   @map("guest_id")
+  /// Scene object id of the table. Deliberately not a foreign key: the scene is
+  /// a JSON document, so keeping this honest is the application's job.
+  tableObjectId String   @map("table_object_id") @db.VarChar(64)
+  /// Seat index around that table, or null for "at this table, anywhere".
+  seatIndex     Int?     @map("seat_index")
+  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  plan  Plan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  guest Guest @relation(fields: [guestId], references: [id], onDelete: Cascade)
+
+  /// One seat per guest per plan.
+  @@unique([planId, guestId])
+  /// And one guest per seat, where a specific seat was chosen.
+  @@unique([planId, tableObjectId, seatIndex])
+  @@index([planId, tableObjectId])
+  @@map("seat_assignment")
+}
+
+/**
+ * ── Vendors and inventory ────────────────────────────────────────────────
+ */
+
+model Vendor {
+  id           BigInt   @id @default(autoincrement())
+  ownerId      BigInt?  @map("owner_id")
+  companyId    BigInt?  @map("company_id")
+  name         String   @db.VarChar(180)
+  /// Florist, caterer, AV, furniture hire, staffing.
+  category     String   @db.VarChar(60)
+  contactName  String?  @map("contact_name") @db.VarChar(120)
+  email        String?  @db.VarChar(255)
+  phone        String?  @db.VarChar(40)
+  website      String?  @db.VarChar(255)
+  addressLine  String?  @map("address_line") @db.VarChar(255)
+  city         String?  @db.VarChar(120)
+  country      String?  @db.Char(2)
+  /// The planner's own 1-5 rating, from having worked with them.
+  rating       Int?     @db.TinyInt
+  leadTimeDays Int?     @map("lead_time_days")
+  notes        String?  @db.Text
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  items InventoryItem[]
+
+  @@index([ownerId, name])
+  @@index([companyId, category])
+  @@map("vendor")
+}
+
+model InventoryItem {
+  id            BigInt   @id @default(autoincrement())
+  ownerId       BigInt?  @map("owner_id")
+  companyId     BigInt?  @map("company_id")
+  vendorId      BigInt?  @map("vendor_id")
+  /// Links stock to the 3D model it represents, so a layout can be costed.
+  catalogItemId BigInt?  @map("catalog_item_id")
+  name          String   @db.VarChar(180)
+  sku           String?  @db.VarChar(80)
+  /// Owned outright, or hired in for each event.
+  ownership     String   @default("owned") @db.VarChar(12)
+  quantityOwned Int      @default(0) @map("quantity_owned")
+  /// What it cost us, in minor units.
+  unitCost      Int      @default(0) @map("unit_cost")
+  /// What the client is charged per event, in minor units.
+  rentalRate    Int      @default(0) @map("rental_rate")
+  currency      String   @default("usd") @db.VarChar(3)
+  storageNote   String?  @map("storage_note") @db.VarChar(180)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  vendor      Vendor?               @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  allocations InventoryAllocation[]
+
+  @@index([ownerId, name])
+  @@index([companyId, isActive])
+  @@index([catalogItemId])
+  @@map("inventory_item")
+}
+
+/// Stock committed to one plan, so double-booking across events is visible.
+model InventoryAllocation {
+  id              BigInt   @id @default(autoincrement())
+  planId          BigInt   @map("plan_id")
+  inventoryItemId BigInt   @map("inventory_item_id")
+  quantity        Int      @default(1)
+  createdAt       DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  plan Plan          @relation(fields: [planId], references: [id], onDelete: Cascade)
+  item InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, inventoryItemId])
+  @@index([inventoryItemId])
+  @@map("inventory_allocation")
+}
+
+/**
+ * ── Proposals and quoting ────────────────────────────────────────────────
+ */
+
+model Proposal {
+  id          BigInt    @id @default(autoincrement())
+  projectId   BigInt    @map("project_id")
+  planId      BigInt?   @map("plan_id")
+  ownerId     BigInt?   @map("owner_id")
+  companyId   BigInt?   @map("company_id")
+  /// Human-facing reference.
+  number      String    @db.VarChar(40)
+  title       String    @db.VarChar(180)
+  status      String    @default("draft") @db.VarChar(12)
+  clientName  String?   @map("client_name") @db.VarChar(180)
+  clientEmail String?   @map("client_email") @db.VarChar(255)
+  eventDate   DateTime? @map("event_date") @db.Date
+  currency    String    @default("usd") @db.VarChar(3)
+  /// Basis points, so 20% is 2000 and no float rounding creeps in.
+  taxRateBp   Int       @default(0) @map("tax_rate_bp")
+  discountBp  Int       @default(0) @map("discount_bp")
+  depositBp   Int       @default(0) @map("deposit_bp")
+  notes       String?   @db.Text
+  terms       String?   @db.Text
+  validUntil  DateTime? @map("valid_until") @db.Date
+  sentAt      DateTime? @map("sent_at") @db.DateTime(3)
+  acceptedAt  DateTime? @map("accepted_at") @db.DateTime(3)
+  declinedAt  DateTime? @map("declined_at") @db.DateTime(3)
+  /// Opaque token for the client-facing view, like plan sharing.
+  shareToken  String?   @unique @map("share_token") @db.VarChar(64)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  project Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lines   ProposalLine[]
+
+  @@index([projectId, status])
+  @@index([ownerId, createdAt])
+  @@map("proposal")
+}
+
+model ProposalLine {
+  id            BigInt  @id @default(autoincrement())
+  proposalId    BigInt  @map("proposal_id")
+  /// item, labour, fee or discount. Discounts carry a negative unit price.
+  kind          String  @default("item") @db.VarChar(12)
+  description   String  @db.VarChar(400)
+  /// Thousandths, so 1.5 days of labour is 1500 and stays exact.
+  quantityMilli Int     @default(1000) @map("quantity_milli")
+  unitLabel     String? @map("unit_label") @db.VarChar(24)
+  /// Minor units of the proposal currency.
+  unitPrice     Int     @default(0) @map("unit_price")
+  taxable       Boolean @default(true)
+  sortOrder     Int     @default(0) @map("sort_order")
+  /// Where the line came from, when it was generated from a layout.
+  catalogItemId BigInt? @map("catalog_item_id")
+  inventoryId   BigInt? @map("inventory_id")
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId, sortOrder])
+  @@map("proposal_line")
+}
+
+/**
+ * ── Version history and review ───────────────────────────────────────────
+ * A version is a whole scene document, stored the same way the live one is.
+ * Diffs would be smaller, but a version has to be restorable years later
+ * without replaying a chain of them — and a scene is a few hundred kilobytes
+ * of JSON, which is not a reason to accept that risk.
+ */
+
+model PlanVersion {
+  id          BigInt   @id @default(autoincrement())
+  planId      BigInt   @map("plan_id")
+  authorId    BigInt?  @map("author_id")
+  label       String   @db.VarChar(180)
+  note        String?  @db.Text
+  /// manual, milestone, before_ai, before_restore, shared or auto.
+  reason      String   @default("manual") @db.VarChar(20)
+  scene       Json
+  objectCount Int      @default(0) @map("object_count")
+  previewUrl  String?  @map("preview_url") @db.VarChar(512)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  plan   Plan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([planId, createdAt])
+  @@map("plan_version")
+}
+
+/// A comment anchored at a point in the scene. A client commenting through a
+/// share link has no account, so authorId is nullable and the display name is
+/// stored on the row rather than resolved through a user.
+model PlanComment {
+  id             BigInt    @id @default(autoincrement())
+  planId         BigInt    @map("plan_id")
+  versionId      BigInt?   @map("version_id")
+  authorId       BigInt?   @map("author_id")
+  authorName     String    @map("author_name") @db.VarChar(120)
+  /// True when the comment arrived through a share token rather than a session.
+  authorIsClient Boolean   @default(false) @map("author_is_client")
+  /// Share token the comment came through, so it can be revoked with the link.
+  shareToken     String?   @map("share_token") @db.VarChar(48)
+  body           String    @db.Text
+  /// everyone or internal. Internal never leaves the workspace.
+  visibility     String    @default("everyone") @db.VarChar(12)
+  status         String    @default("open") @db.VarChar(10)
+  /// Anchor: position, optional object, and the camera it was left from.
+  anchor         Json
+  resolvedAt     DateTime? @map("resolved_at") @db.DateTime(3)
+  resolvedById   BigInt?   @map("resolved_by_id")
+  resolvedByName String?   @map("resolved_by_name") @db.VarChar(120)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  plan    Plan               @relation(fields: [planId], references: [id], onDelete: Cascade)
+  author  User?              @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  replies PlanCommentReply[]
+
+  @@index([planId, status, createdAt])
+  @@index([planId, visibility])
+  @@map("plan_comment")
+}
+
+model PlanCommentReply {
+  id             BigInt   @id @default(autoincrement())
+  commentId      BigInt   @map("comment_id")
+  authorId       BigInt?  @map("author_id")
+  authorName     String   @map("author_name") @db.VarChar(120)
+  authorIsClient Boolean  @default(false) @map("author_is_client")
+  body           String   @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  comment PlanComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([commentId, createdAt])
+  @@map("plan_comment_reply")
+}
+
+/**
+ * ── Rate cards ───────────────────────────────────────────────────────────
+ * The agency cost database. Lines are stored as JSON rather than rows: a card
+ * is read whole, written whole, and never queried line by line, so normalising
+ * it would buy nothing and cost a join on every estimate.
+ */
+
+model RateCard {
+  id              BigInt   @id @default(autoincrement())
+  ownerId         BigInt?  @map("owner_id")
+  companyId       BigInt?  @map("company_id")
+  name            String   @db.VarChar(180)
+  currency        String   @default("usd") @db.VarChar(3)
+  regionCode      String   @default("global") @map("region_code") @db.VarChar(24)
+  /// Blanket uplift or discount applied to every line, in basis points.
+  adjustmentBp    Int      @default(0) @map("adjustment_bp")
+  /// Hourly crew rate in minor units.
+  crewRate        Int      @default(4500) @map("crew_rate")
+  lines           Json
+  /// Build-hour overrides handed to the take-off engine.
+  labourOverrides Json?    @map("labour_overrides")
+  isDefault       Boolean  @default(false) @map("is_default")
+  createdAt       DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  owner   User?    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([companyId])
+  @@map("rate_card")
+}
+
+/**
+ * ── Venue intelligence ──────────────────────────────────────────────────
+ * Separate from `venue`, which holds generated GLB shells. This is the
+ * specification of a real building: what it measures, what it will carry, how
+ * a truck reaches it and what the rules are.
+ */
+
+model VenueSpec {
+  id           BigInt    @id @default(autoincrement())
+  ownerId      BigInt?   @map("owner_id")
+  companyId    BigInt?   @map("company_id")
+  scope        String    @default("personal") @db.VarChar(10)
+  name         String    @db.VarChar(180)
+  buildingName String    @default("") @map("building_name") @db.VarChar(180)
+  spaceType    String    @default("ballroom") @map("space_type") @db.VarChar(24)
+  city         String    @default("") @db.VarChar(120)
+  country      String    @default("") @db.Char(2)
+  regionCode   String    @default("global") @map("region_code") @db.VarChar(24)
+  widthMm      Int       @map("width_mm")
+  depthMm      Int       @map("depth_mm")
+  areaSqM      Decimal   @default(0) @map("area_sq_m") @db.Decimal(10, 2)
+  /// Non-rectangular footprint, when one has been traced.
+  outline      Json?
+  /// Structure, access, services, rules and capacity — see shared/venueLibrary.
+  structure    Json
+  access       Json
+  services     Json
+  rules        Json
+  capacity     Json
+  modelUrl     String?   @map("model_url") @db.VarChar(512)
+  /// Floors found in the model's own geometry — see shared/venueLibrary.
+  floorLevels  Json?     @map("floor_levels")
+  /// What the importer measured and changed, so the UI can say so.
+  modelFacts   Json?     @map("model_facts")
+  previewUrl   String?   @map("preview_url") @db.VarChar(512)
+  floorPlanUrl String?   @map("floor_plan_url") @db.VarChar(512)
+  verified     Boolean   @default(false)
+  verifiedAt   DateTime? @map("verified_at") @db.DateTime(3)
+  sourceNote   String    @default("") @map("source_note") @db.VarChar(400)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  owner   User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([scope, country, city])
+  @@index([ownerId])
+  @@index([companyId])
+  @@map("venue_spec")
+}
+
+/**
+ * ── Marketplace ───────────────────────────────────────────────────────────
+ */
+
+model MarketplaceListing {
+  id          BigInt   @id @default(autoincrement())
+  sellerId    BigInt   @map("seller_id")
+  kind        String   @db.VarChar(24)
+  title       String   @db.VarChar(180)
+  summary     String   @default("") @db.VarChar(300)
+  description String   @db.Text
+  /// Minor units. Zero is a free listing, which is allowed and encouraged.
+  price       Int      @default(0)
+  currency    String   @default("usd") @db.VarChar(3)
+  previewUrl  String?  @map("preview_url") @db.VarChar(512)
+  galleryUrls Json?    @map("gallery_urls")
+  tags        Json?
+  regionCode  String   @default("global") @map("region_code") @db.VarChar(24)
+  /// The thing being sold: a scene, a set of objects, venue specs, a card.
+  payload     Json
+  status      String   @default("draft") @db.VarChar(12)
+  reviewNote  String?  @map("review_note") @db.Text
+  sales       Int      @default(0)
+  ratingSum   Int      @default(0) @map("rating_sum")
+  ratingCount Int      @default(0) @map("rating_count")
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  seller    User                  @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  purchases MarketplacePurchase[]
+
+  @@index([status, kind, createdAt])
+  @@index([sellerId])
+  @@map("marketplace_listing")
+}
+
+model MarketplacePurchase {
+  id              BigInt   @id @default(autoincrement())
+  listingId       BigInt   @map("listing_id")
+  buyerId         BigInt   @map("buyer_id")
+  /// Price paid and commission taken, both in minor units at the time of sale.
+  /// Recorded rather than derived, so a later rate change cannot rewrite what a
+  /// seller was actually paid.
+  price           Int
+  commission      Int
+  currency        String   @default("usd") @db.VarChar(3)
+  stripeSessionId String?  @map("stripe_session_id") @db.VarChar(120)
+  rating          Int?     @db.TinyInt
+  review          String?  @db.Text
+  createdAt       DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  listing MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer   User               @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+
+  /// One purchase per buyer per listing: buying it twice is a mistake, not a
+  /// transaction.
+  @@unique([listingId, buyerId])
+  @@index([buyerId, createdAt])
+  @@map("marketplace_purchase")
+}
+
+/**
+ * ── Specialists ───────────────────────────────────────────────────────────
+ */
+
+model Specialist {
+  id            BigInt   @id @default(autoincrement())
+  userId        BigInt   @unique @map("user_id")
+  name          String   @db.VarChar(160)
+  headline      String   @default("") @db.VarChar(200)
+  bio           String   @db.Text
+  skills        Json
+  /// Day rate in minor units; null means "on application".
+  dayRate       Int?     @map("day_rate")
+  currency      String   @default("usd") @db.VarChar(3)
+  regionCode    String   @default("global") @map("region_code") @db.VarChar(24)
+  city          String   @default("") @db.VarChar(120)
+  country       String   @default("") @db.Char(2)
+  remote        Boolean  @default(true)
+  availability  String   @default("available") @db.VarChar(12)
+  avatarUrl     String?  @map("avatar_url") @db.VarChar(512)
+  portfolioUrls Json?    @map("portfolio_urls")
+  ratingSum     Int      @default(0) @map("rating_sum")
+  ratingCount   Int      @default(0) @map("rating_count")
+  completedJobs Int      @default(0) @map("completed_jobs")
+  verified      Boolean  @default(false)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requests SpecialistRequest[]
+
+  @@index([availability, regionCode])
+  @@map("specialist")
+}
+
+model SpecialistRequest {
+  id           BigInt    @id @default(autoincrement())
+  specialistId BigInt    @map("specialist_id")
+  requesterId  BigInt    @map("requester_id")
+  projectId    BigInt?   @map("project_id")
+  planId       BigInt?   @map("plan_id")
+  skill        String    @db.VarChar(32)
+  brief        String    @db.Text
+  budget       Int?
+  currency     String    @default("usd") @db.VarChar(3)
+  neededBy     DateTime? @map("needed_by") @db.Date
+  status       String    @default("open") @db.VarChar(12)
+  /// Share token issued so the specialist can open the plan without an account
+  /// on the requester workspace.
+  shareToken   String?   @map("share_token") @db.VarChar(48)
+  responseNote String?   @map("response_note") @db.Text
+  respondedAt  DateTime? @map("responded_at") @db.DateTime(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  specialist Specialist @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+  requester  User       @relation(fields: [requesterId], references: [id], onDelete: Cascade)
+  project    Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([specialistId, status])
+  @@index([requesterId, createdAt])
+  @@map("specialist_request")
+}

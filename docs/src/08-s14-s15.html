@@ -1,0 +1,273 @@
+<!-- ============================ 14. THE AI SUITE ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 14</span>
+    <h2>The AI suite</h2>
+    <p class="sec-sub">Four job types, one lifecycle. The commercial engine of the product.</p>
+  </div>
+
+  <h3>14.1 The shared job lifecycle</h3>
+  <div class="ascii">  ┌─ preflight ──────────────────────────────────────────────────────────┐
+  │  plan tier?  company flag?  role?  credit balance?                    │
+  │  fail → PLAN_UPGRADE_REQUIRED | INSUFFICIENT_CREDITS | feature off    │
+  └───────────────┬──────────────────────────────────────────────────────┘
+                  ▼
+  client generates  Idempotency-Key = "{action}-{uuid}"
+                  ▼
+  POST → 202 { job_id | run_id, status: "queued" }        ── credits debited
+                  ▼
+  GET  status  ·  poll  ·  queued → in_progress(progress %) → completed | failed
+                  ▼
+  ┌ completed ─────────────┐   ┌ failed / cancelled ───────────────────┐
+  │ artefact URL returned  │   │ credits refunded · fall back to the   │
+  │ appended to history    │   │ free manual path where one exists     │
+  └────────────────────────┘   └───────────────────────────────────────┘</div>
+  <p>
+    All four report into one operational view (<code>/admin/reports/ai-process-runs</code>) with common
+    columns: user, email, company, plan, provider, model, status, reference id, error, timestamps.
+    Build the abstraction once.
+  </p>
+
+  <h3>14.2 AI Enhance — photoreal render from the current view</h3>
+  <figure>
+    <img src="img/ai-enhance-result.jpg" alt="AI enhanced interior render">
+    <figcaption><strong>AI Enhance output.</strong> The result replaces the viewport image behind a <em>Show AI Enhanced</em> checkbox at the top-left of the canvas, so the user can toggle between the raw 3D scene and the render without leaving the editor.</figcaption>
+  </figure>
+  <table class="tight">
+    <tbody>
+      <tr><td style="width:34mm"><strong>What it does</strong></td><td>Generates an improved image from the current plan view “while trying to preserve the existing structure, objects, camera angle, and layout.”</td></tr>
+      <tr><td><strong>Input</strong></td><td>A canvas capture plus an editable <strong>prompt</strong> — “Describe how the image should be enhanced” / “Edit the enhancement prompt before generating the AI-enhanced image.”</td></tr>
+      <tr><td><strong>Models</strong></td><td>A default model, a pro model (<code>nano_banana_2</code>) and a Qwen option — each with its own credit cost.</td></tr>
+      <tr><td><strong>Cost</strong></td><td>2 credits for the default; the pro and Qwen rates are admin-set.</td></tr>
+      <tr><td><strong>Output</strong></td><td>Toggled via <em>Show AI Enhanced</em>; appended to the plan’s AI Renders history with a thumbnail.</td></tr>
+      <tr><td><strong>History</strong></td><td>“Review previous AI Enhance results for this plan.” — collapsible panel, count badge, empty state “No AI renders yet”.</td></tr>
+      <tr><td><strong>Errors</strong></td><td>“AI Enhancement failed”, “Enhancement failed to start”, “No canvas image available. Please ensure the plan is rendered.”</td></tr>
+      <tr><td><strong>Guest mode</strong></td><td>Available to guests via a separate endpoint.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Marketing claims “&lt;2 min render time”. The states are staged carefully — <em>Enhance → Enhancing… →
+    AI Enhancement complete</em> — with the header button itself carrying the progress.
+  </p>
+
+  <h3>14.3 AI Image to 3D — photo to catalogue asset</h3>
+  <figure>
+    <img src="img/img-to-3d.jpg" alt="Img to 3d workspace">
+    <figcaption><strong>The Image-to-3D workspace.</strong> Three columns: source upload with guidance and a <em>Generate 3D Model</em> action; the live 3D preview with job status; and metadata for catalogue saving. The <em>Model Transform</em> block is the critical part — it converts an unscaled generated mesh into a correctly sized rental item.</figcaption>
+  </figure>
+
+  <h4>Flow</h4>
+  <ol>
+    <li><strong>Upload</strong> — JPG, PNG or WebP, 10 MB max.</li>
+    <li><strong>Configure</strong> — model tier (“Pro 3.1”, “Planner AI V1”, “Planner AI V1 pro”), <strong>PBR</strong> toggle (“Use PBR mode for richer material output when needed”), optional Blender post-process.</li>
+    <li><strong>Generate</strong> — 10 credits. Status: “Uploading image and creating worker job…” → “Starting worker…” → Queued → Working → <em>Status: completed — 3D model generated successfully</em>.</li>
+    <li><strong>Review</strong> — orbit the preview; “Draft ready 100%”.</li>
+    <li><strong>Set the height</strong> — see below.</li>
+    <li><strong>Download GLB</strong> or <strong>Save to Catalog</strong>.</li>
+  </ol>
+
+  <h4>Model Transform — the step that makes it usable</h4>
+  <table class="tight">
+    <tbody>
+      <tr><td style="width:40mm"><code>source_height_cm</code></td><td>“Detected Height” — measured from the generated mesh bounds</td></tr>
+      <tr><td><code>target_height_cm</code></td><td>Operator-entered real height. <strong>Required to save to catalog</strong>; must be &gt; 0.</td></tr>
+      <tr><td>Uniform scale factor</td><td>Derived and displayed (<code>×1.000</code>)</td></tr>
+      <tr><td><code>anchor_mode</code></td><td>e.g. <code>bottom_center</code> — so the item sits on the floor rather than through it</td></tr>
+      <tr><td>Units</td><td>Imperial / Metric toggle within the modal</td></tr>
+      <tr><td><code>transformed_glb</code></td><td>The rescaled, re-anchored mesh that is actually stored</td></tr>
+    </tbody>
+  </table>
+  <p class="src">Helper text: “Set the target height before saving. Download uses the target height when present.” · “Required for catalog save. Internally stored in cm.”</p>
+
+  <h4>Input guidance shown to the user</h4>
+  <ul>
+    <li>Use a simple or solid-colour background.</li>
+    <li>Avoid text overlays and blended backgrounds.</li>
+    <li>Keep to one object instead of a multi-object scene.</li>
+    <li>Fill more than half of the frame with the object.</li>
+  </ul>
+
+  <h4>Save to Catalog</h4>
+  <p>
+    Requires Model Name, Description and Category; <strong>Scope</strong> selects <em>My catalog</em>, <em>Company only</em> or
+    <em>Global library</em> (the last two gated by role). A preview image is captured automatically from the
+    3D workspace. History is browsable and reopenable; already-saved runs are read-only.
+  </p>
+  <p>
+    Post-save advice from the help centre: check scale, texture quality and orientation before using
+    generated models in production layouts.
+  </p>
+  <p>
+    The workspace also exists as a standalone route (<code>/dashboard/generate-model</code>), and can be
+    disabled per account: “This workflow is currently turned off for this account. A super admin can
+    re-enable it from the user settings in the Super Admin Console.”
+  </p>
+
+  <h3>14.4 Floor Plan AI Draw</h3>
+  <p>
+    Covered end to end in §13.3. In job terms: input is the <em>calibrated</em> raster plan; output is a set of
+    wall segments inserted into the scene for review; cost is 3 credits; failure always falls back to
+    Manual Draw.
+  </p>
+
+  <h3>14.5 Venue Generator — photos to a navigable 3D environment</h3>
+  <p>
+    The most ambitious feature and the newest — labelled “Private, resumable generation · beta”. It runs
+    on its own route as a multi-step wizard rather than inside the editor.
+  </p>
+
+  <h4>Input modes</h4>
+  <table class="tight">
+    <thead><tr><th style="width:30mm">Mode</th><th style="width:24mm">Key</th><th>Requirements</th></tr></thead>
+    <tbody>
+      <tr><td>Single photo</td><td><code>single</code></td><td>“One clear photo of the venue.” Sharp, well-lit, visible architecture.</td></tr>
+      <tr><td>Multi-view</td><td><code>multi_view</code></td><td>Front · 0° and Back · 180° <strong>required</strong>; Right · 90° and Left · 270° optional.</td></tr>
+      <tr><td>360° panorama</td><td><code>panorama</code></td><td>“One exact 2:1 equirectangular image.” Projection, 2:1 dimensions and the left/right wrap seam are validated: “Width must equal exactly 2 × height after orientation normalization.”</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Upload limits: JPG, PNG or WebP · <strong>10 MiB each, 40 MiB total</strong> · all files uploaded together ·
+    <strong>EXIF/GPS stripped</strong>.
+  </p>
+
+  <h4>Wizard steps</h4>
+  <ol>
+    <li><strong>Prepare inputs</strong> — choose the venue library or upload new photos. “Reuse an existing Venue from your library or upload a new venue photo.”</li>
+    <li><strong>Analyzing inputs</strong> — “Preparing and uploading the selected source images…”</li>
+    <li><strong>AI suggestions</strong> — optional preset-driven cleanup proposals. Skippable: “Inputs uploaded. AI suggestions are unavailable, but you can continue with presets or the original set.”</li>
+    <li><strong>Optional cleanup</strong> — <em>one included request</em> per run. A single prompt (“Example: remove the bar stools and flower arrangements”) is applied <strong>atomically to every view</strong>: “One prompt is applied atomically to every view; a partial result is never selected.” Then choose <em>Use cleaned set</em> or <em>Use original set</em>.</li>
+    <li><strong>Generate Venue</strong> — pick a model (<code>marble-1.0-draft</code>) and name it (“Example: Grand Ballroom”). Runs asynchronously: “World Labs is generating the Venue…”</li>
+    <li><strong>Venue ready</strong> — SPZ Gaussian-splat preview; saved automatically to the reusable library “even if you close this window.”</li>
+  </ol>
+
+  <h4>What the service guarantees</h4>
+  <p class="src">
+    “The service preserves walls, doors, windows, columns, floor, ceiling and camera perspective.”
+    Cleanup is “one atomic, architecture-preserving edit across every input” that removes temporary items
+    while preserving architecture.
+  </p>
+
+  <h4>Venue library and attachment</h4>
+  <ul>
+    <li>Three scopes: <strong>Public</strong> (every signed-in planner), <strong>Company</strong>, <strong>Personal</strong>.</li>
+    <li>Attach to a plan with <em>Use in this plan</em>. If one exists: “This plan already has a Venue. Replace only its environment? Furniture, groups and camera will remain unchanged.”</li>
+    <li>In the editor the venue can be locked/unlocked, hidden/shown, transformed, and detached. Detaching “removes the Venue environment from this plan… The reusable Venue stays in your Venue library.”</li>
+    <li>Quality modes: <em>adaptive</em>, <em>full</em> (“Load full-resolution Venue”), with graceful failure — “The Venue environment could not be loaded. Planner objects are still available.”</li>
+  </ul>
+
+  <h4>Credits and failure handling</h4>
+  <ul>
+    <li>“Every Venue model costs {n} credits”; charged when the run is <strong>queued</strong>.</li>
+    <li><em>Cancel generation · refund credits</em> is an explicit, labelled action.</li>
+    <li>Provider billing failure is surfaced honestly: “World Labs could not start generation because its account needs active billing or available credits. Contact an administrator before retrying.” (<code>provider_payment_required</code>)</li>
+    <li>On failure: “Venue generation failed. Your selected inputs are still available.” — inputs are never lost.</li>
+  </ul>
+
+  <div class="box warn">
+    <span class="lab">Recommendation for Nozila</span>
+    <p>
+      This feature carries the highest cost and the least proven value in the product: a 5 MB client
+      renderer, an expensive third-party dependency, multi-minute latency, and a beta label. <strong>Defer it.</strong>
+      A calibrated floor plan plus a photographic background delivers most of the client-facing benefit at
+      a fraction of the cost. Revisit once the core product is earning.
+    </p>
+  </div>
+</div>
+
+<!-- ============================ 15. OUTPUT ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 15</span>
+    <h2>Output &amp; distribution</h2>
+    <p class="sec-sub">Export, share, embed, templates, collections and the guest workflow.</p>
+  </div>
+
+  <h3>15.1 Export</h3>
+  <table class="tight">
+    <thead><tr><th style="width:26mm">Format</th><th>Behaviour</th></tr></thead>
+    <tbody>
+      <tr><td><strong>PDF</strong></td><td>Printable plan review. <strong>Requires the plan to be saved first</strong> — “Please save the plan before exporting PDF”. Company logo is used on PDF exports.</td></tr>
+      <tr><td><strong>PNG</strong></td><td>Quick image of the current view.</td></tr>
+      <tr><td><strong>Video</strong></td><td>Records a camera-path fly-through client-side via <code>MediaRecorder</code> as <code>video/webm;codecs=vp8</code>. Availability is browser-dependent: “Video export is not supported in this browser.”</td></tr>
+    </tbody>
+  </table>
+  <p>
+    States are explicit throughout — <em>Exporting PDF… / PDF exported / PDF export failed</em>. The server
+    returns a download URL; a missing one is reported as “Export response missing download URL.”
+    Emits an <code>export_completed</code> analytics event.
+  </p>
+
+  <h3>15.2 Share links</h3>
+  <ul>
+    <li><em>Share → Copy share link</em> mints a token and copies a read-only URL (<code>/share/:token</code>).</li>
+    <li>Read-only plans cannot be shared: “Read-only plans cannot be shared.”</li>
+    <li>Viewer states: <em>Shared Plan Unavailable</em>, “This share link has expired.”, “Share link not found.”, “Missing share token”.</li>
+    <li>Shared views hide all editing affordances and show a “View only” badge.</li>
+  </ul>
+
+  <h3>15.3 Embed</h3>
+  <p>
+    <em>Share → Embed iframe</em> generates copy-paste iframe markup with configurable <strong>Width</strong> and
+    <strong>Height</strong> (validated: “Use 100% or a pixel width.”, “Use a pixel height.”). Embedded views can
+    remove the normal header entirely.
+  </p>
+  <p>
+    This is the mechanism behind the marketing claim “Let clients design their own events directly on
+    your website” — a rental company embeds a plan or a guest session in its own site.
+  </p>
+
+  <h3>15.4 Templates</h3>
+  <table class="tight">
+    <tbody>
+      <tr><td style="width:30mm"><strong>Purpose</strong></td><td>Reuse a full plan setup — a room shell, a standard floor plan, a common seating arrangement.</td></tr>
+      <tr><td><strong>Scopes</strong></td><td><em>Local</em> — “stay private to your account”. <em>Global</em> — “available to every user.”</td></tr>
+      <tr><td><strong>Fields</strong></td><td>Name (min 3 chars, unique — <code>TEMPLATE_TITLE_EXISTS</code>), description (“What this template is for”), visibility.</td></tr>
+      <tr><td><strong>Loading</strong></td><td>Destructive and warned: “Loading this template will remove current scene objects and replace them with template objects.” Confirmation: <em>Replace Scene Objects?</em></td></tr>
+      <tr><td><strong>Overwrite</strong></td><td>“Do you want to overwrite it with the current plan snapshot?” → <em>Overwrite Template?</em></td></tr>
+      <tr><td><strong>Constraint</strong></td><td>“Please save the plan before creating a template.”</td></tr>
+      <tr><td><strong>Also used for</strong></td><td>Onboarding starter workspaces — an admin maps each answer combination to a global template.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>15.5 Collections</h3>
+  <p>
+    Reusable groups of selected objects — lounge sets, table groups, stage packages, decor clusters.
+    Select objects → <em>Save as Collection</em> → name it. They appear under the Catalog panel’s
+    <strong>Collections</strong> tab and are placed like catalogue items.
+  </p>
+  <ul>
+    <li><strong>Relative placement is preserved.</strong></li>
+    <li>A preview image is captured from the 3D canvas at save time.</li>
+    <li>Cards show name and object count (“Lounge — 5 objects”, “Collection 1 — 1632 objects”), plus a sub-line listing contents (“Mic Stage Speaker and more”).</li>
+    <li>Guard: “Select one or more objects first.” Empty state: “No collections yet. Save selected objects in the editor to create one.”</li>
+    <li>Drag-and-drop uses custom MIME types — <code>application/x-3d-catalog-item</code> and <code>application/x-3d-collection</code>.</li>
+  </ul>
+
+  <h3>15.6 Guest workflow</h3>
+  <p>
+    A no-account path intended for embedding on a rental company’s own website.
+  </p>
+  <ol>
+    <li><strong>Guest Entry</strong> — name, email, and a background photo (JPG/PNG, 10 MB max).</li>
+    <li><strong>Perspective extraction</strong> — the app analyses the photo and derives camera parameters:
+      <strong>vanishing points</strong>, <strong>horizon line</strong> (raw px and normalised), <strong>FOV</strong>, <strong>tilt angle</strong>,
+      <strong>yaw angle</strong> and <strong>camera position</strong>. Progress: “Extracting Perspective…” → “✓ Perspective
+      Extracted!”</li>
+    <li><strong>Guest Editor</strong> — a reduced editor at <code>/guest-editor/:sessionId</code> with catalog and
+      properties panels, AI Enhance and Export, but no save, share or import.</li>
+  </ol>
+  <div class="box fact">
+    <span class="lab">Genuinely clever, and cheap to build</span>
+    <p>
+      Perspective extraction means a guest’s furniture sits in <em>their own photo</em> at a plausible angle
+      instead of floating on a flat backdrop. It is classical computer vision — vanishing-point detection
+      via a homography solve, which the bundle confirms (“Homography requires exactly 4 point
+      correspondences”) — not an AI call, so it costs nothing per use.
+    </p>
+    <p style="margin-bottom:0;">
+      Session state lives in browser storage, with an explicit quota-exceeded path
+      (“Storage quota exceeded. Image will not be saved.”) and periodic cleanup of stale sessions.
+      Sessions expire: “The guest session could not be found or has expired.”
+    </p>
+  </div>
+</div>

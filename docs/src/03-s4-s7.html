@@ -1,0 +1,408 @@
+<!-- ============================ 4. OBSERVED ARCHITECTURE ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 04</span>
+    <h2>Observed architecture</h2>
+    <p class="sec-sub">The stack as actually shipped, read directly from production assets.</p>
+  </div>
+
+  <h3>4.1 Client</h3>
+  <table class="tight">
+    <thead><tr><th style="width:40mm">Concern</th><th>Observed implementation</th></tr></thead>
+    <tbody>
+      <tr><td>Build tool</td><td>Vite — hashed <code>index-*.js</code> entry, ES-module chunks, <code>crossorigin</code> preload</td></tr>
+      <tr><td>Framework</td><td>React 18 with <code>StrictMode</code>, <code>createRoot</code>, <code>Suspense</code> + <code>lazy()</code> per route</td></tr>
+      <tr><td>Routing</td><td>React Router v6 with v7 future flags (<code>v7_startTransition</code>, <code>v7_relativeSplatPath</code>)</td></tr>
+      <tr><td>Server state</td><td>TanStack Query — <code>staleTime</code> 5 min, <code>refetchOnWindowFocus: false</code></td></tr>
+      <tr><td>Client state</td><td>Zustand (editor store, auth store)</td></tr>
+      <tr><td>HTTP</td><td>axios with a configured <code>baseURL</code>; snake_case payloads; <code>Idempotency-Key</code> header on mutating AI calls</td></tr>
+      <tr><td>3D</td><td>Three.js via react-three-fiber + drei (<code>docs.pmnd.rs</code> references), <code>GLTFLoader</code>, <code>EffectComposer</code>, <code>UnrealBloomPass</code>, <code>SelectionBox</code>, transform controls</td></tr>
+      <tr><td>Styling</td><td>Tailwind utilities over a hand-built <code>--qiso-*</code> CSS-variable token layer</td></tr>
+      <tr><td>Auth</td><td>Email/password plus Google OAuth (<code>@react-oauth/google</code>); reCAPTCHA on login and register</td></tr>
+      <tr><td>Errors</td><td>Sentry browser SDK, <code>service: web</code> tag, HTTP bodies and user info excluded</td></tr>
+      <tr><td>Analytics</td><td>Yandex Metrika with <em>webvisor</em> session replay, clickmap and link tracking; plus a first-party <code>/analytics/*</code> event API</td></tr>
+      <tr><td>Support</td><td>Gleap — in-app widget, product tours, checklists, and the hosted knowledge base</td></tr>
+    </tbody>
+  </table>
+
+  <h3>4.2 Code-splitting map</h3>
+  <p>Nineteen route-level chunks plus shared feature chunks. Chunk weight is a good proxy for where the complexity actually lives:</p>
+  <table class="tight">
+    <thead><tr><th style="width:52mm">Chunk</th><th class="num" style="width:18mm">Size</th><th>What it contains</th></tr></thead>
+    <tbody>
+      <tr><td><code>SparkVenueScene</code></td><td class="num">4.98 MB</td><td>Gaussian-splat renderer for AI-generated venue environments — by far the heaviest asset</td></tr>
+      <tr><td><code>GLTFLoader</code></td><td class="num">900 KB</td><td>Three.js core plus GLTF/DRACO/KTX2 loading</td></tr>
+      <tr><td><code>ThreeCanvas</code></td><td class="num">300 KB</td><td>Scene graph, camera rig, transform gizmos, tent object, Biljax stage geometry, curtain anchors</td></tr>
+      <tr><td><code>UndoRedoControls</code></td><td class="num">227 KB</td><td>History stack <em>and</em> the whole properties/tool panel tree (misleadingly named)</td></tr>
+      <tr><td><code>EditorPage</code></td><td class="num">136 KB</td><td>Editor shell, header, Table Designer, templates, collections, export, share</td></tr>
+      <tr><td><code>SafeEnvironment</code></td><td class="num">129 KB</td><td>HDRI environment loading with failure fallback</td></tr>
+      <tr><td><code>CompanyAccessPage</code></td><td class="num">97 KB</td><td>The Super Admin Console (route <code>/dashboard/adminconsole</code>)</td></tr>
+      <tr><td><code>ImgTo3DModal</code></td><td class="num">51 KB</td><td>Image-to-3D workspace: upload, poll, preview, transform, save-to-catalog</td></tr>
+      <tr><td><code>VenueGeneratorPage</code></td><td class="num">38 KB</td><td>Multi-step AI venue generation wizard</td></tr>
+      <tr><td><code>OnboardingPage</code></td><td class="num">27 KB</td><td>Two-question survey plus plan selection and Stripe hand-off</td></tr>
+    </tbody>
+  </table>
+
+  <h3>4.3 Backend, as far as it can be inferred</h3>
+  <p>
+    The API is served same-origin under a base path; no separate API host appears anywhere in the bundle.
+    Endpoint shapes are strongly indicative:
+  </p>
+  <ul>
+    <li><strong>Plain REST</strong>, resource-oriented, no GraphQL and no tRPC.</li>
+    <li><strong>snake_case</strong> throughout request bodies and query parameters — consistent with Python (FastAPI/Django) or PHP rather than a Node/TypeScript backend.</li>
+    <li><strong>Numeric auto-increment IDs</strong> in URLs (<code>/editor/152</code>), not UUIDs — a relational database with integer primary keys.</li>
+    <li><strong>Idempotency keys generated client-side</strong> via <code>crypto.randomUUID()</code> and sent as a header or body field on every AI mutation — the backend deduplicates.</li>
+    <li><strong>Long-running work is job-based</strong>: a POST returns a job or run id, the client then polls a status endpoint. There are no websockets.</li>
+    <li><strong>Uploads are multipart</strong> to <code>/uploads/*</code>, returning a <code>file_key</code> that is later referenced or deleted.</li>
+  </ul>
+
+  <div class="box fact">
+    <span class="lab">Confirmed relational, which matters</span>
+    <p>
+      Integer path IDs, snake_case fields, offset/limit pagination (<code>?limit=200&amp;offset=0</code>), sort tokens
+      like <code>created_desc</code>, and CSV export of credit history all point to a conventional relational
+      backend. <strong>MySQL is a natural fit for Nozila</strong> — the subject's own design is already relational
+      in shape, with one important exception covered in §8: the scene document.
+    </p>
+  </div>
+
+  <h3>4.4 External services in the critical path</h3>
+  <table class="tight">
+    <thead><tr><th style="width:36mm">Service</th><th style="width:32mm">Used for</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Stripe</td><td>All billing</td><td>Checkout Sessions, Customer Portal, recurring Prices for Plus/Pro, one-time Prices for credit packs, seat subscriptions</td></tr>
+      <tr><td>Google Maps</td><td>Aerial capture</td><td>Places autocomplete + Static Maps; browser key is public in the bundle</td></tr>
+      <tr><td>Google OAuth</td><td>Social sign-in</td><td>Single client ID</td></tr>
+      <tr><td>World Labs</td><td>Venue generation</td><td>Named explicitly in error copy; model id <code>marble-1.0-draft</code>; produces SPZ Gaussian splats</td></tr>
+      <tr><td>“nano banana”</td><td>AI Enhance</td><td>Model keys <code>nano_banana_2</code> / <code>ai_enhance_nano_banana_2</code> — an image-to-image model</td></tr>
+      <tr><td>Qwen</td><td>AI Enhance (alt)</td><td>Selectable alternate enhance model</td></tr>
+      <tr><td>“Planner AI V1 / Pro 3.1”</td><td>Image to 3D</td><td>Provider-labelled model tiers; optional PBR mode and a Blender post-process step</td></tr>
+      <tr><td>Gleap</td><td>Support</td><td>Widget, tours, checklists, help centre</td></tr>
+      <tr><td>Sentry</td><td>Errors</td><td>—</td></tr>
+      <tr><td>Yandex Metrika</td><td>Product analytics</td><td>Includes full session replay</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============================ 5. TARGET ARCHITECTURE ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 05</span>
+    <h2>Target architecture for Nozila</h2>
+    <p class="sec-sub">React and MySQL, as specified — and the decisions that will be expensive to reverse.</p>
+  </div>
+
+  <h3>5.1 Recommended shape</h3>
+  <div class="ascii">┌──────────────────────────────────────────────────────────────────────────────┐
+│  BROWSER                                                                     │
+│  React 18 + Vite  ·  React Router  ·  TanStack Query  ·  Zustand             │
+│  react-three-fiber + drei  ·  Tailwind over CSS custom properties            │
+└───────────────────────────────┬──────────────────────────────────────────────┘
+                                │  REST / JSON  (Bearer JWT)
+┌───────────────────────────────▼──────────────────────────────────────────────┐
+│  API                                                                         │
+│  Auth · Projects · Plans · Catalog · Textures · Templates · Collections       │
+│  Uploads · Sharing · Billing · Credits · Company · Admin · Analytics          │
+└──────┬──────────────────┬──────────────────┬──────────────────┬──────────────┘
+       │                  │                  │                  │
+┌──────▼──────┐  ┌────────▼────────┐  ┌──────▼───────┐  ┌───────▼────────┐
+│  MySQL 8    │  │  Object storage │  │  Job queue   │  │  Stripe        │
+│  metadata   │  │  S3/R2:         │  │  + workers   │  │  Maps · AI     │
+│  + scene    │  │  glb, textures, │  │  (Redis or   │  │  providers     │
+│  JSON docs  │  │  renders, plans │  │   DB-backed) │  │                │
+└─────────────┘  └─────────────────┘  └──────────────┘  └────────────────┘</div>
+
+  <h3>5.2 The five decisions that matter</h3>
+
+  <div class="card">
+    <h4>1 · Store all geometry as integer millimetres</h4>
+    <p>
+      The subject does this without exception — every dimension field in the bundle ends in <code>_mm</code>
+      (<code>width_mm</code>, <code>deck_height_mm</code>, <code>fold_amplitude_mm</code>, <code>bottom_left_extent_mm</code>).
+      Camera and world positions are the only metre-denominated values. Integer millimetres eliminate
+      float drift in snapping, make equality comparisons safe, and keep imperial/metric purely a
+      presentation concern.
+    </p>
+    <p style="margin-bottom:0;">
+      <strong>Implication:</strong> <code>INT</code> columns, not <code>DECIMAL</code> or <code>FLOAT</code>. Convert once at the UI boundary.
+    </p>
+  </div>
+
+  <div class="card">
+    <h4>2 · One scene document per plan, stored as JSON</h4>
+    <p>
+      The editor loads an entire scene and saves it whole. Normalising scene objects into rows would mean
+      thousands of inserts per save, a painful undo story, and no benefit — nothing ever queries “all
+      chairs across all plans.” MySQL 8’s native <code>JSON</code> type is the right home.
+    </p>
+    <p style="margin-bottom:0;">
+      Keep <em>indexable</em> facts (object count, has-venue, last-saved) as generated columns or plain columns
+      alongside the document. Version the document with a <code>schema_version</code> integer from day one.
+    </p>
+  </div>
+
+  <div class="card">
+    <h4>3 · Credits are an append-only ledger</h4>
+    <p>
+      The observed system supports monthly cycle grants, purchased packs with expiry dates, transfers in
+      and out of a company pool, per-feature debits, refunds on cancellation, and CSV export filtered by
+      member and feature. Event codes seen in the bundle include <code>credit_mode_cycle_grant</code>,
+      <code>credit_mode_transfer_in</code>, <code>credit_mode_transfer_out</code> and <code>credit_purchase</code>.
+    </p>
+    <p style="margin-bottom:0;">
+      A balance column cannot represent that history. Write a <code>credit_ledger</code> table and derive the
+      balance; cache it on the user row if read performance demands it, but never treat the cache as truth.
+    </p>
+  </div>
+
+  <div class="card">
+    <h4>4 · A single job subsystem for all four AI features</h4>
+    <p>
+      Image-to-3D, AI Enhance, Floor Plan AI Draw and Venue Generation share one lifecycle:
+      <em>validate access → check credits → accept idempotency key → enqueue → poll status → deliver artefact →
+      debit or refund</em>. Build that once. The subject clearly did: all four report into a common
+      <code>/admin/reports/ai-process-runs</code> view.
+    </p>
+    <p style="margin-bottom:0;">
+      Status vocabulary observed: <code>idle · queued · in_progress · working · completed · failed · cancelled</code>.
+    </p>
+  </div>
+
+  <div class="card">
+    <h4>5 · Server-driven configuration from the start</h4>
+    <p>
+      Pricing, per-action credit costs, plan quotas, credit packs, onboarding options, starter-template
+      assignments and even the colour theme are all fetched from the API, not compiled in. The client
+      degrades explicitly when they are unavailable (“Pricing unavailable. Paid checkout is disabled until
+      backend pricing is available”).
+    </p>
+    <p style="margin-bottom:0;">
+      This is what makes the admin console load-bearing rather than optional. Plan for it in phase one.
+    </p>
+  </div>
+
+  <h3>5.3 Where Nozila should deliberately diverge</h3>
+  <table class="tight">
+    <thead><tr><th style="width:44mm">Subject’s choice</th><th style="width:44mm">Recommended for Nozila</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Yandex Metrika with session replay</td><td>PostHog or self-hosted</td><td>Session replay of a paid B2B tool raises real privacy questions; jurisdiction matters to Western buyers</td></tr>
+      <tr><td>Polling for job status</td><td>Server-Sent Events, polling as fallback</td><td>Venue generation runs for minutes; polling is wasteful and feels slow</td></tr>
+      <tr><td>Gaussian splats for venues (5 MB chunk)</td><td>Defer; ship photo-backdrop + calibrated plan first</td><td>Highest cost, least proven value, heaviest client payload of anything in the product</td></tr>
+      <tr><td>No quoting</td><td><strong>Build quoting</strong></td><td>The gap between their marketing and their product is the clearest wedge available</td></tr>
+      <tr><td>Numeric sequential IDs in share URLs</td><td>Opaque tokens for anything public</td><td><code>/editor/152</code> is enumerable; share links must not be guessable</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============================ 6. INFORMATION ARCHITECTURE ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 06</span>
+    <h2>Information architecture</h2>
+    <p class="sec-sub">Complete route table, access guards and navigation graph.</p>
+  </div>
+
+  <h3>6.1 Route table</h3>
+  <p class="src">Transcribed verbatim from the router in the production bundle. All 22 routes.</p>
+  <table class="tight">
+    <thead><tr><th style="width:52mm">Path</th><th style="width:44mm">Component</th><th style="width:20mm">Guard</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><code>/login</code></td><td>LoginPage</td><td>public</td><td>Email/password + Google; reCAPTCHA; <code>?return_to=</code> preserved</td></tr>
+      <tr><td><code>/register</code></td><td>RegisterPage</td><td>public</td><td>Individual or Company account type</td></tr>
+      <tr><td><code>/forgot-password</code></td><td>ForgotPasswordPage</td><td>public</td><td>Request reset link</td></tr>
+      <tr><td><code>/reset-password</code></td><td>ResetPasswordPage</td><td>public</td><td>Token-based reset</td></tr>
+      <tr><td><code>/verify-email</code></td><td>VerifyEmailPage</td><td>public</td><td>Token verification, returns to prior page</td></tr>
+      <tr><td><code>/accept-invite</code></td><td>AcceptInvitePage</td><td>public</td><td>Company seat invitation acceptance</td></tr>
+      <tr><td><code>/upgrade</code></td><td>UpgradePage</td><td>public</td><td>Landing target for upgrade emails; preselects Plus or Pro</td></tr>
+      <tr><td><code>/guest-entry</code></td><td>GuestEntryPage</td><td>public</td><td>Name, email and a background photo — no account</td></tr>
+      <tr><td><code>/guest-editor/:sessionId</code></td><td>GuestEditorPage</td><td>public</td><td>Cut-down editor for guests</td></tr>
+      <tr><td><code>/share/:token</code></td><td>SharePage</td><td>public</td><td>Read-only plan viewer; also the embed target</td></tr>
+      <tr><td><code>/onboarding</code></td><td>OnboardingPage</td><td>auth</td><td>Two-question survey + plan choice + Stripe</td></tr>
+      <tr><td><code>/dashboard</code></td><td>DashboardPage</td><td>auth</td><td>Project grid — the app home</td></tr>
+      <tr><td><code>/projects/:projectId</code></td><td>ProjectPage</td><td>auth</td><td>Plans within a project</td></tr>
+      <tr><td><code>/projects/:projectId/venue-generator</code></td><td>VenueGeneratorPage</td><td>auth</td><td>AI venue generation wizard</td></tr>
+      <tr><td><code>/projects/:projectId/venue-generator/:runId</code></td><td>VenueGeneratorPage</td><td>auth</td><td>Resume a specific run</td></tr>
+      <tr><td><code>/editor/:planId</code></td><td>EditorPage</td><td>auth</td><td><strong>The product.</strong></td></tr>
+      <tr><td><code>/dashboard/generate-model</code></td><td>AdminGeneratePage</td><td>auth</td><td>Standalone Image-to-3D workspace</td></tr>
+      <tr><td><code>/dashboard/textures</code></td><td>TexturesPage</td><td>asset access</td><td>Texture set management</td></tr>
+      <tr><td><code>/dashboard/company-admin</code></td><td>CompanyAdminDashboardPage</td><td>company admin</td><td>Company users, projects, planners</td></tr>
+      <tr><td><code>/dashboard/adminconsole</code></td><td>CompanyAccessPage</td><td>super admin</td><td>Super Admin Console — 11 sections</td></tr>
+      <tr><td><code>/</code> and <code>*</code></td><td>redirect</td><td>—</td><td>To <code>/dashboard</code> if authenticated, else <code>/login</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>6.2 Access model</h3>
+  <p>
+    A route guard wraps every authenticated route. Beyond authentication, four independent axes gate
+    functionality — a feature is available only when <em>all four</em> permit it:
+  </p>
+  <table class="tight">
+    <thead><tr><th style="width:30mm">Axis</th><th style="width:44mm">Values</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td>Subscription tier</td><td><code>free · plus · pro</code></td><td>Gates AI features and full catalogue; error code <code>PLAN_UPGRADE_REQUIRED</code></td></tr>
+      <tr><td>Role</td><td><code>user · company_admin · super_admin</code></td><td>Gates admin routes; super admins bypass all plan and credit gating</td></tr>
+      <tr><td>Company flags</td><td><code>global_models_enabled</code>, <code>global_textures_enabled</code>, <code>company_admin_can_manage_assets</code>, <code>ai_image_to_3d_enabled</code>, <code>venue_generation_access_override</code></td><td>Per-tenant enable/disable of catalogue scope and individual AI features</td></tr>
+      <tr><td>Credit balance</td><td>integer</td><td>Blocks the run at execution time; error code <code>INSUFFICIENT_CREDITS</code></td></tr>
+    </tbody>
+  </table>
+  <div class="box">
+    <span class="lab">Design principle worth copying</span>
+    <p>
+      The help centre states it directly: “The interface may show locked actions so you know a feature
+      exists, but access is still checked when the action runs.” <strong>Show locked features rather than hiding
+      them</strong> — it is both better UX and a continuous upgrade prompt. Enforce on the server regardless.
+    </p>
+  </div>
+
+  <h3>6.3 Navigation graph</h3>
+  <div class="ascii">  register ──► onboarding ──► [Stripe checkout] ──► dashboard
+      │            (role · design categories · plan)      │
+   login ──────────────────────────────────────────────►  │
+                                                          ▼
+                                             ┌──── Your Projects ────┐
+                                             │                       │
+                                     project card              account menu
+                                             │                  ├─ Account
+                                             ▼                  ├─ Subscription
+                                        Plans list              ├─ Company Dashboard  (company admin)
+                                             │                  ├─ Admin Console      (super admin)
+                                             ▼                  └─ Logout
+                                     ┌── EDITOR /editor/:id ──┐
+                                     │                        │
+              ┌──────────────────────┼────────────────────────┼───────────────────┐
+              ▼                      ▼                        ▼                   ▼
+        Catalog panel          3D viewport            Properties panel       Header actions
+        · Catalog              · top / perspective    · contextual by type   · Templates
+        · Collections          · transform gizmo      · AI Renders           · Save
+        · Table Designer       · radial menu          · Scene Lighting       · Undo / Redo
+        · AI Image to 3D       · perf overlay (admin) · builder panels       · Export ▸ PDF/PNG/Video
+                                                                             · Share  ▸ link / iframe
+        Bottom toolbar ─ select · box · line · shapes · wall · lock ·         · AI Enhance
+                         isolate · focus · grid · import ▸ · delete ▸
+
+        guest-entry ──► guest-editor          share/:token ──► read-only viewer / iframe embed</div>
+</div>
+
+<!-- ============================ 7. DESIGN SYSTEM ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 07</span>
+    <h2>Design system</h2>
+    <p class="sec-sub">Tokens, components and layout metrics, extracted from the compiled stylesheet.</p>
+  </div>
+
+  <h3>7.1 Token architecture</h3>
+  <p>
+    Every colour is a CSS custom property prefixed <code>--qiso-</code>. The palette is <strong>dark-first</strong>
+    (<code>--qiso-color-scheme: dark</code>), built on Tailwind’s slate scale for surfaces and a single accent ramp
+    exposed both as hex and as space-separated RGB triples so Tailwind opacity modifiers work.
+  </p>
+
+  <div class="grid2">
+    <div>
+      <h5>Surfaces &amp; ink</h5>
+      <table class="tight">
+        <tbody>
+          <tr><td><code>--qiso-bg</code></td><td class="num">#020617</td></tr>
+          <tr><td><code>--qiso-bg-soft</code></td><td class="num">#07111f</td></tr>
+          <tr><td><code>--qiso-canvas-bg</code></td><td class="num">#050b18</td></tr>
+          <tr><td><code>--qiso-surface</code></td><td class="num">rgba(15,23,42,.74)</td></tr>
+          <tr><td><code>--qiso-surface-strong</code></td><td class="num">rgba(15,23,42,.92)</td></tr>
+          <tr><td><code>--qiso-surface-muted</code></td><td class="num">rgba(30,41,59,.72)</td></tr>
+          <tr><td><code>--qiso-border</code></td><td class="num">rgba(148,163,184,.16)</td></tr>
+          <tr><td><code>--qiso-border-strong</code></td><td class="num">rgba(56,189,248,.36)</td></tr>
+          <tr><td><code>--qiso-text</code></td><td class="num">#f8fafc</td></tr>
+          <tr><td><code>--qiso-text-muted</code></td><td class="num">#94a3b8</td></tr>
+          <tr><td><code>--qiso-text-subtle</code></td><td class="num">#64748b</td></tr>
+          <tr><td><code>--qiso-grid</code></td><td class="num">rgba(255,255,255,.025)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h5>Accent &amp; semantic</h5>
+      <table class="tight">
+        <tbody>
+          <tr><td><code>--qiso-primary</code></td><td class="num">#0ea5e9</td></tr>
+          <tr><td><code>--qiso-primary-strong</code></td><td class="num">#0284c7</td></tr>
+          <tr><td><code>--qiso-primary-soft</code></td><td class="num">rgba(14,165,233,.14)</td></tr>
+          <tr><td><code>--qiso-primary-foreground</code></td><td class="num">#ffffff</td></tr>
+          <tr><td><code>--qiso-success</code></td><td class="num">#10b981</td></tr>
+          <tr><td><code>--qiso-warning</code></td><td class="num">#f59e0b</td></tr>
+          <tr><td><code>--qiso-danger</code></td><td class="num">#ef4444</td></tr>
+          <tr><td><code>--qiso-focus</code></td><td class="num">rgba(125,211,252,.75)</td></tr>
+          <tr><td><code>--qiso-radius</code></td><td class="num">0.5rem</td></tr>
+          <tr><td><code>--qiso-shadow</code></td><td class="num">0 24px 70px rgba(2,8,23,.36)</td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:8pt;color:var(--ink-3);">
+        Each semantic colour also has <code>-soft</code> (12–14% fill) and <code>-border</code> (32–36%) variants —
+        a tidy three-part pattern worth copying: <em>solid / soft fill / border</em>.
+      </p>
+    </div>
+  </div>
+
+  <div class="box warn">
+    <span class="lab">The theme is server-driven — verified</span>
+    <p>
+      The stylesheet default is sky blue (<code>#0ea5e9</code>), but every live capture shows an
+      <strong>indigo/violet</strong> accent. The bundle contains <code>GET /theme/config</code>, <code>GET /admin/theme</code>,
+      <code>PATCH /admin/theme</code>, an <code>active_theme_id</code> field, and named presets including
+      <em>“DesignCode Light”</em> and <em>“Qiso Blueprint”</em>. The admin console copy reads: “Choose the global Qiso
+      palette. Users still control Dark or Light mode in Account.”
+    </p>
+    <p style="margin-bottom:0;">
+      <strong>So there are two independent layers:</strong> a globally administered palette, and a per-user
+      light/dark preference. Nozila should build both; retrofitting runtime theming into hard-coded
+      colours is miserable.
+    </p>
+  </div>
+
+  <h3>7.2 Component classes</h3>
+  <p class="src">All 57 <code>.qiso-*</code> classes present in the compiled stylesheet, grouped by role.</p>
+  <table class="tight">
+    <thead><tr><th style="width:28mm">Group</th><th>Classes</th></tr></thead>
+    <tbody>
+      <tr><td>Buttons</td><td><code>qiso-button-primary</code> <code>qiso-button-secondary</code> <code>qiso-button-danger</code> <code>qiso-icon-button</code></td></tr>
+      <tr><td>Form</td><td><code>qiso-input</code> <code>qiso-select</code> <code>qiso-chip</code></td></tr>
+      <tr><td>Containers</td><td><code>qiso-panel</code> <code>qiso-panel-muted</code> <code>qiso-card</code> <code>qiso-card-hover</code> <code>qiso-page-shell</code> <code>qiso-page-header</code></td></tr>
+      <tr><td>Modal</td><td><code>qiso-modal-overlay</code> <code>qiso-modal-panel</code> <code>qiso-modal-header</code> <code>qiso-modal-body</code> <code>qiso-modal-footer</code></td></tr>
+      <tr><td>Table</td><td><code>qiso-table-container</code> <code>qiso-table</code> <code>qiso-table-head-row</code> <code>qiso-table-row</code></td></tr>
+      <tr><td>Notices</td><td><code>qiso-notice</code> + <code>-neutral</code> <code>-success</code> <code>-warning</code> <code>-error</code></td></tr>
+      <tr><td>Typography</td><td><code>qiso-text-strong</code> <code>qiso-text-muted</code> <code>qiso-text-subtle</code></td></tr>
+      <tr><td><strong>Editor-specific</strong></td><td><code>qiso-editor-header</code> <code>qiso-editor-main</code> <code>qiso-editor-toolbar</code> <code>qiso-editor-panel</code> <code>qiso-editor-panel-header</code> <code>qiso-editor-panel-body</code> <code>qiso-editor-section</code> <code>qiso-editor-section-header</code> <code>qiso-editor-field</code> <code>qiso-editor-search</code> <code>qiso-editor-action</code> <code>qiso-editor-action-primary</code> <code>qiso-editor-icon-action</code> <code>qiso-editor-menu</code> <code>qiso-editor-menu-item</code> <code>qiso-editor-menu-label</code> <code>qiso-editor-segment</code> <code>qiso-editor-segment-button</code> <code>qiso-editor-segment-button-active</code> <code>qiso-editor-item-card</code> <code>qiso-editor-item-card-active</code> <code>qiso-editor-item-card-locked</code> <code>qiso-editor-thumb</code> <code>qiso-editor-muted-card</code> <code>qiso-editor-separator</code></td></tr>
+    </tbody>
+  </table>
+  <p>
+    The editor has its own component vocabulary distinct from the rest of the app — denser padding,
+    smaller type, tighter radii. That separation is deliberate and worth reproducing: dashboard components
+    at editor density feel cramped, and editor components at dashboard density waste the panel.
+  </p>
+
+  <h3>7.3 Typography and layout metrics</h3>
+  <div class="grid2">
+    <div>
+      <h5>Type</h5>
+      <ul>
+        <li><strong>Inter</strong> throughout, weights 300–800 (marketing site loads exactly this range).</li>
+        <li>Editor body text ≈ 12–13 px; labels ≈ 11 px; panel section headings ≈ 11 px uppercase with tracking.</li>
+        <li>Canvas overlay labels use <code>18px Inter var</code>.</li>
+      </ul>
+    </div>
+    <div>
+      <h5>Editor metrics (measured from 1440-wide captures)</h5>
+      <ul>
+        <li>Header height ≈ 48 px</li>
+        <li>Left catalog panel ≈ 190–215 px</li>
+        <li>Right properties panel ≈ 235–250 px</li>
+        <li>Bottom toolbar ≈ 44 px, left-aligned icons</li>
+        <li>Floating transform bar centred at ~24 px from top of canvas</li>
+      </ul>
+    </div>
+  </div>
+
+  <figure>
+    <img src="img/editor-overview.jpg" alt="Editor overview">
+    <figcaption><strong>The three-column editor shell.</strong> Left: catalog with category filter, search and item cards showing real dimensions. Centre: viewport with floating transform toolbar, view-cube control top-right, axis gizmo bottom-right. Right: contextual properties. Bottom: tool rail, unit toggle and a persistent keyboard legend. <em>(Earlier UI generation — note “Table Wizard” and “Auto Layout”, since renamed.)</em></figcaption>
+  </figure>
+</div>

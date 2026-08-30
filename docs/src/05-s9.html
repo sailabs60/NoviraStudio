@@ -1,0 +1,242 @@
+<!-- ============================ 9. API SURFACE ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 09</span>
+    <h2>REST API surface</h2>
+    <p class="sec-sub">Every endpoint observed in the production bundle, grouped by domain. Paths are verbatim.</p>
+  </div>
+
+  <p class="lede">
+    This is the single most valuable artefact in this document. Roughly 180 endpoints were recovered by
+    reading axios call sites in the shipped JavaScript. Paths and request payload keys are <strong>observed
+    fact</strong>; response shapes are inferred from how the client consumes them and are marked where
+    uncertain.
+  </p>
+
+  <h3>9.1 Authentication &amp; account</h3>
+  <table class="tight">
+    <thead><tr><th style="width:14mm">Method</th><th style="width:56mm">Path</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/auth/register</code></td><td>Individual or Company. Company variant adds <code>companyName</code>, <code>companyAddress</code>, <code>companyCountry</code>, <code>companyPostalCode</code>, <code>phone</code>, main email. reCAPTCHA token required.</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/auth/login</code></td><td>Email + password; reCAPTCHA</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/auth/google</code></td><td>Google credential exchange</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/auth/me</code></td><td>Session user: profile, role, plan, credits, company, flags</td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/auth/me</code></td><td><code>display_name</code>, <code>preferred_units</code>, appearance</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/auth/me/password</code></td><td>Requires current password; new ≥ 8 chars</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/auth/forgot</code></td><td>Send reset link</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/auth/reset</code></td><td>Token + new password</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/auth/verify</code></td><td>Email verification token</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/auth/verification/resend</code></td><td>Rate-limited</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/auth/onboarding/section-1</code></td><td>“I am a” options</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/auth/onboarding/section-2</code></td><td>“I mainly design” options</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/auth/onboarding/bootstrap-assigned-template</code></td><td>Creates the starter project + “Wellcome plan” from the answer pair</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/privacy/consent</code></td><td rowspan="2">Consent capture</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/privacy/consent</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.2 Projects &amp; plans</h3>
+  <table class="tight">
+    <thead><tr><th style="width:14mm">Method</th><th style="width:56mm">Path</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/projects/</code></td><td>Project list with recent plan previews</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/projects/</code></td><td><code>title</code>, optional <code>description</code></td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/projects/{id}</code></td><td>Rename / re-describe</td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/projects/{id}</code></td><td>Blocked while plans exist</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/plans/?project_id={id}</code></td><td>Plans in a project</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/plans/</code></td><td>All plans for the user</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/plans/</code></td><td><code>title</code>, <code>project_id</code>, <code>editor_type</code></td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/plans/{id}</code></td><td><strong>The save endpoint</strong> — scene document, walls, lighting, camera</td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/plans/{id}</code></td><td>—</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/plans/share/{token}</code></td><td>Public read-only fetch</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/plans/{id}/share</code></td><td>Mint a share token; blocked on read-only plans</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/plans/{id}/export</code></td><td>PDF / PNG / video; returns a download URL</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.3 Catalogue, textures, templates &amp; collections</h3>
+  <table class="tight">
+    <thead><tr><th style="width:14mm">Method</th><th style="width:56mm">Path</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/catalog/categories</code></td><td rowspan="2">Category list / create</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/catalog/categories</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/catalog/items?…</code></td><td>Params: <code>q</code>, <code>category_id</code>, <code>category_slug</code>, <code>scope</code>, <code>company_id</code>, <code>limit</code>, <code>offset</code>, <code>include_texture_variations</code>, <code>tables-with-linens</code> mode</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/catalog/items/by-ids?…</code></td><td>Bulk hydrate on scene load</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/catalog/items/{id}/model</code></td><td>Signed model URL (refreshed on expiry)</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/catalog/items/{id}/texture-variations</code></td><td>—</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/catalog/items/upload-with-model</code></td><td>multipart: model (OBJ/FBX/GLB/GLTF, ≤ 50 MB), preview (≤ 5 MB), <code>texture_files</code>, metadata</td></tr>
+      <tr><td><span class="meth m-put">PUT</span></td><td><code>/catalog/items/{id}/update-with-model</code></td><td>Replace model and/or variations</td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/catalog/items/{id}</code></td><td>—</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/textures/categories</code></td><td rowspan="4">Texture library</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/textures/assets</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/textures/sets</code></td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/textures/assets/{id}</code></td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/textures/assets/{id}</code></td><td>—</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/templates/</code></td><td>Local + global</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/templates/</code></td><td>Save current plan as template</td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/templates/{id}</code></td><td>Overwrite / rename</td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/templates/{id}</code></td><td>—</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/templates/{id}/apply-to-plan</code></td><td>Replaces current scene objects</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/collections/</code></td><td rowspan="3">Object-group collections</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/collections/</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/collections/{id}</code></td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/collections/{id}</code></td><td>—</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/articles/by-key/{key}</code></td><td>Contextual in-app help lookup</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/theme/config</code></td><td>Active palette tokens</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.4 Uploads &amp; site context</h3>
+  <table class="tight">
+    <thead><tr><th style="width:14mm">Method</th><th style="width:56mm">Path</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/uploads/background</code></td><td>PNG/JPG/WebP/GIF/SVG, ≤ 10 MB. Returns <code>file_key</code>.</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/uploads/google-maps-static</code></td><td>Server-side Static Maps capture; returns image + scale metadata</td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/uploads/{file_key}</code></td><td>Explicit cleanup on replace/remove</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/plans/{id}/floor-plan/ai-draw</code></td><td>Start wall tracing. Raster only — SVG rejected.</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/plans/{id}/floor-plan/ai-draw/{jobId}</code></td><td>Poll status → wall segments</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.5 AI: Enhance, Image-to-3D, Venue Generation</h3>
+  <table class="tight">
+    <thead><tr><th style="width:14mm">Method</th><th style="width:62mm">Path</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/plans/{id}/ai-enhance</code></td><td>Body: canvas image, <code>prompt</code>, <code>model</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/plans/{id}/ai-enhance/{jobId}</code></td><td>Poll</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/plans/{id}/ai-enhance/history</code></td><td>Powers the “AI Renders” panel</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/plans/guest/{sessionId}/ai-enhance</code></td><td>Guest-mode variant</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/model-generation/upload-image-v3</code></td><td>multipart: image (JPG/PNG/WebP ≤ 10 MB), <code>pbr_enabled</code>, model tier. Returns <code>job_id</code>.</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/model-generation/status/{job_id}</code></td><td>Poll</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/model-generation/history</code></td><td rowspan="2">Past runs, reopenable</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/model-generation/history/{id}</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/model-generation/save-to-catalog</code></td><td><code>name</code>, <code>description</code>, <code>category_id</code>, <code>scope</code>, <code>company_id</code>, <code>target_height_cm</code>, <code>anchor_mode</code>, <code>transformed_glb</code>, <code>preview_image</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/projects/{id}/venue-generation-capabilities</code></td><td>Access + credit preflight</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/projects/{id}/venue-generation-runs</code></td><td>multipart. <code>input_mode</code>: <code>single</code> | <code>multi_view</code> | <code>panorama</code>. Idempotency-Key header.</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/projects/{id}/venue-generation-runs?limit=20</code></td><td>Run history</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/venue-generation-runs/{id}</code></td><td>Poll a run</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/venue-generation-runs/{id}/suggestions</code></td><td>Body: <code>revision_set_id</code>, <code>idempotency_key</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/venue-generation-runs/{id}/suggestions/skip</code></td><td>—</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/venue-generation-runs/{id}/image-revisions</code></td><td>Body: <code>parent_revision_set_id</code>, <code>prompt</code>, <code>preset_ids</code>. One cleanup included per run.</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/venue-generation-runs/{id}/generate</code></td><td>Body: <code>revision_set_id</code>, <code>model</code>, <code>name</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/venue-generation-runs/{id}/cancel</code></td><td>Refunds credits</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/venue-generation-runs/{id}/finish</code></td><td>Body: <code>name</code>, <code>scale_profile_id</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/projects/{id}/venues</code></td><td>Reusable venue library</td></tr>
+      <tr><td><span class="meth m-put">PUT</span></td><td><code>/plans/{id}/venue</code></td><td>Attach. Body: <code>venue_id</code>, <code>replace</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/plans/{id}/venue</code></td><td>Accepts <code>share_token</code> for public views</td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/plans/{id}/venue/transform</code></td><td>Position / rotation / scale of the environment</td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/plans/{id}/venue</code></td><td>Detach; venue stays in the library</td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.6 Subscription, credits &amp; company billing</h3>
+  <table class="tight">
+    <thead><tr><th style="width:14mm">Method</th><th style="width:62mm">Path</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/subscription/pricing</code></td><td>Live tier prices; checkout disabled if unavailable</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/subscription/credit-ratios</code></td><td>Cost per action, for display</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/subscription/cancellation-reasons</code></td><td>Required reason list</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/subscription/checkout-session</code></td><td rowspan="2">Plan checkout</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/subscription/checkout-sessions/{id}/complete</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/subscription/checkout-sessions/{id}/complete-onboarding</code></td><td>Onboarding-specific return path</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/subscription/credit-checkout-session</code></td><td rowspan="2">Credit-pack purchase</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/subscription/credit-checkout-sessions/{id}/complete</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/subscription/customer-portal</code></td><td>Stripe portal redirect</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/subscription/cancel</code></td><td>Reason + optional note; schedules at period end</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/company/profile</code></td><td rowspan="2">Company details</td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/company/profile</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/company/logo</code></td><td rowspan="2">≤ 10 MB, resized to 512 px, used on PDF exports and embeds</td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/company/logo</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/company/convert</code></td><td>Upgrade an individual account to a company workspace</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/company/members</code></td><td>Team list</td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/company/members/{id}</code></td><td>Role / visibility</td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/company/members/{id}</code></td><td>Projects transfer to the company owner</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/company/seats</code></td><td rowspan="2">Add a seat; company card charged before invite is sent</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/company/seats/preview</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/company/seats/checkout-sessions/{id}/complete</code></td><td>—</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/company/members/{id}/upgrade</code></td><td rowspan="2">Move a member Plus → Pro mid-cycle, with proration preview</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/company/members/{id}/upgrade/preview</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/company/members/{id}/credits/checkout-session</code></td><td rowspan="2">Buy credits for one member</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/company/member-credit-checkout-sessions/{id}/complete</code></td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/company/settings/credit-mode</code></td><td>Per-user ⇄ shared pool; applies next cycle</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/company/credits/history</code></td><td rowspan="2">Usage by member and feature; CSV export</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/company/credits/history/export</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/company/billing/expenses</code></td><td>Company spend</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/company/billing/customer-portal</code></td><td>Stripe portal for the company</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/company/invitations/preview</code></td><td rowspan="2">Invitation landing + acceptance</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/company/invitations/accept</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.7 Administration</h3>
+  <p class="src">All 26 admin endpoint families, recovered from the Super Admin Console chunk and the main bundle.</p>
+  <table class="tight">
+    <thead><tr><th style="width:14mm">Method</th><th style="width:62mm">Path</th><th>Console section</th></tr></thead>
+    <tbody>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/analytics/dashboard</code></td><td rowspan="3">Analytics</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/analytics/registered-users</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/analytics/registered-users/{id}/events</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/users?…</code></td><td rowspan="6">Users — search, filter by company / role / status, paginate</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/admin/users</code></td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/admin/users/{id}</code></td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/admin/users/{id}</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/admin/users/{id}/impersonate</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/admin/users/{id}/reset-password</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/companies</code></td><td rowspan="4">Companies + tenant asset flags</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/admin/companies</code></td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/admin/companies/{id}</code></td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/admin/companies/{id}</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/companies/{id}/users?sort=created_desc</code></td><td>Company Users</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/company/users?…</code></td><td rowspan="3">Company Users drill-down</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/company/users/{id}/projects</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/company/users/{id}/plans</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/company/projects/{id}/plans</code></td><td>—</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/catalog-reviews?…</code></td><td rowspan="4">Model &amp; Venue Review</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/catalog-reviews/{id}</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/admin/catalog-reviews/{id}/approve</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/admin/catalog-reviews/{id}/reject</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/subscription-billing-prices</code></td><td rowspan="2">Stripe Pricing — creates new recurring Prices</td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/admin/subscription-billing-prices</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/subscription-plan-credits</code></td><td rowspan="2">Plan monthly credit quotas</td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/admin/subscription-plan-credits</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/subscription-credit-packs</code></td><td rowspan="2">Purchasable packs</td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/admin/subscription-credit-packs</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/subscription-credit-ratios</code></td><td rowspan="2"><strong>Cost per AI action</strong></td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/admin/subscription-credit-ratios</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/subscription-users</code></td><td>Paid Subscribers</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/subscription-requests</code></td><td rowspan="3">Manual upgrade approvals</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/admin/subscription-requests/{id}/approve</code></td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/admin/subscription-requests/{id}/reject</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/subscription-cancellations</code></td><td>Cancellation Feedback</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/subscription-cancellation-reasons</code></td><td rowspan="3">Reason catalogue (<code>requires_note</code>, order)</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/admin/subscription-cancellation-reasons</code></td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/admin/subscription-cancellation-reasons/{id}</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/onboarding/section-1</code></td><td rowspan="6">Onboarding options + starter-template grid</td></tr>
+      <tr><td><span class="meth m-post">POST</span></td><td><code>/admin/onboarding/section-1</code></td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/admin/onboarding/section-1/{id}</code></td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/admin/onboarding/section-1/{id}</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/onboarding/template-assignments/grid</code></td></tr>
+      <tr><td><span class="meth m-put">PUT</span></td><td><code>/admin/onboarding/template-assignments</code></td></tr>
+      <tr><td><span class="meth m-del">DEL</span></td><td><code>/admin/onboarding/template-assignments/{id}</code></td><td><em>(section-2 mirrors section-1 exactly)</em></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/reports/model-generations?…</code></td><td rowspan="3">Operational AI reporting, filterable and searchable</td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/reports/venue-generations?…</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/reports/ai-process-runs?…</code></td></tr>
+      <tr><td><span class="meth m-get">GET</span></td><td><code>/admin/theme</code></td><td rowspan="2">Global palette preset</td></tr>
+      <tr><td><span class="meth m-patch">PATCH</span></td><td><code>/admin/theme</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>9.8 Cross-cutting conventions</h3>
+  <table class="tight">
+    <thead><tr><th style="width:38mm">Concern</th><th>Convention</th></tr></thead>
+    <tbody>
+      <tr><td>Pagination</td><td><code>?limit=&amp;offset=</code>; responses carry <code>has_more</code>. Infinite scroll in catalogue panels (“Scroll to load more…”).</td></tr>
+      <tr><td>Sorting</td><td>Token strings — <code>created_desc</code></td></tr>
+      <tr><td>Filtering</td><td><code>created_from</code> / <code>created_to</code>, <code>status</code>, <code>company_id</code>, <code>mode</code>, free-text <code>q</code></td></tr>
+      <tr><td>Idempotency</td><td><code>Idempotency-Key</code> header on multipart AI posts; <code>idempotency_key</code> body field on JSON AI posts. Client-generated as <code>{action}-{uuid}</code>.</td></tr>
+      <tr><td>Error codes</td><td><code>PLAN_UPGRADE_REQUIRED</code> · <code>PLAN_REQUEST_PENDING</code> · <code>INSUFFICIENT_CREDITS</code> · <code>TEMPLATE_TITLE_EXISTS</code> · <code>provider_payment_required</code> · <code>payment_failed</code></td></tr>
+      <tr><td>Access failures</td><td>403 and 404 are treated identically by the client’s retry logic — retries are suppressed, and the user is redirected to <code>/dashboard</code></td></tr>
+      <tr><td>Public access</td><td>Share endpoints accept a <code>share_token</code> query parameter instead of a bearer token</td></tr>
+    </tbody>
+  </table>
+</div>

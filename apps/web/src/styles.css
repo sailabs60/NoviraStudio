@@ -1,0 +1,579 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Design tokens.
+ *
+ * Novira is a white tool. The surface is paper, the ink is near-black, and one
+ * blue — #0072FD — carries every action, every selection and nothing else.
+ * That restraint is the whole point: in a tool where the user's own work is the
+ * content, colour that is not communicating something is noise competing with
+ * the drawing.
+ *
+ * Four independent layers, and keeping them independent is what lets the
+ * product be usable by people who need very different things from it:
+ *
+ *  · theme        — light (the default) or dark, a per-user preference
+ *  · density      — comfortable or compact; a planner on a laptop and one on a
+ *                   32-inch monitor want different amounts of screen per control
+ *  · contrast     — a genuine contrast increase, not a darker theme
+ *  · text size    — an accessibility preference, applied as a root font scale
+ *                   so every rem-based measurement follows it
+ *
+ * Everything is a space-separated RGB triple so Tailwind's `/<alpha-value>`
+ * opacity modifiers keep working.
+ */
+:root,
+:root[data-theme='light'] {
+  /* Ground. Paper white, with two barely-there steps beneath it for the
+     recessed areas — a canvas, a well, an inset strip. */
+  --nv-bg: 255 255 255;
+  --nv-bg-soft: 247 249 252;
+  --nv-canvas: 240 243 248;
+
+  /* Raised things. On a white ground a panel is separated by a border and a
+     shadow, not by a different fill, so surface and bg agree on purpose. */
+  --nv-surface: 255 255 255;
+  --nv-surface-strong: 255 255 255;
+  --nv-surface-muted: 244 247 251;
+
+  /* Lines. Light enough to be structure rather than decoration. */
+  --nv-border: 226 232 240;
+  --nv-border-strong: 203 212 224;
+
+  /* Ink. Near-black rather than black — pure black on white vibrates. */
+  --nv-text: 11 18 32;
+  --nv-text-muted: 84 96 114;
+  --nv-text-subtle: 128 140 158;
+
+  /* The one accent. */
+  --nv-primary: 0 114 253;
+  --nv-primary-strong: 0 92 214;
+  --nv-primary-soft: 232 241 255;
+  --nv-primary-fg: 255 255 255;
+
+  /* Status. Kept away from the accent hue so "selected" never reads as
+     "informational", and tuned for AA on white. */
+  --nv-success: 9 145 90;
+  --nv-success-soft: 232 248 241;
+  --nv-warning: 176 92 4;
+  --nv-warning-soft: 255 244 230;
+  --nv-danger: 208 40 40;
+  --nv-danger-soft: 254 238 238;
+  --nv-info: 8 133 175;
+  --nv-info-soft: 233 246 252;
+
+  --nv-shadow: 15 27 48;
+  color-scheme: light;
+}
+
+/**
+ * Dark.
+ *
+ * Kept, because people work late and some monitors are brutal — but it is now
+ * the alternative, not the default, and it uses the same blue lifted for
+ * legibility on a dark ground rather than a different accent.
+ */
+:root[data-theme='dark'] {
+  --nv-bg: 12 16 24;
+  --nv-bg-soft: 16 21 31;
+  --nv-canvas: 8 11 18;
+
+  --nv-surface: 20 26 37;
+  --nv-surface-strong: 24 31 44;
+  --nv-surface-muted: 30 38 53;
+
+  --nv-border: 42 52 70;
+  --nv-border-strong: 62 75 97;
+
+  --nv-text: 240 244 250;
+  --nv-text-muted: 158 170 189;
+  --nv-text-subtle: 118 131 152;
+
+  --nv-primary: 61 148 255;
+  --nv-primary-strong: 0 114 253;
+  --nv-primary-soft: 20 41 71;
+  --nv-primary-fg: 255 255 255;
+
+  --nv-success: 45 190 130;
+  --nv-success-soft: 16 46 36;
+  --nv-warning: 234 165 60;
+  --nv-warning-soft: 51 38 16;
+  --nv-danger: 247 106 106;
+  --nv-danger-soft: 55 24 26;
+  --nv-info: 84 190 232;
+  --nv-info-soft: 15 43 55;
+
+  --nv-shadow: 0 0 0;
+  color-scheme: dark;
+}
+
+/*
+ * High contrast.
+ *
+ * Not a darker theme — a genuine contrast increase on the two things that fail
+ * first for low-vision users: borders that dissolve into the background, and
+ * muted text used for information that is not actually secondary.
+ */
+:root[data-contrast='high'] {
+  --nv-border: 148 160 176;
+  --nv-border-strong: 90 104 124;
+  --nv-text-muted: 32 43 60;
+  --nv-text-subtle: 55 68 87;
+}
+:root[data-theme='dark'][data-contrast='high'] {
+  --nv-border: 108 126 152;
+  --nv-border-strong: 152 170 196;
+  --nv-text-muted: 214 224 238;
+  --nv-text-subtle: 182 195 214;
+}
+
+/* Root font scale. Every rem measurement in the app follows it. */
+:root[data-text-size='large'] {
+  font-size: 17.6px;
+}
+:root[data-text-size='larger'] {
+  font-size: 19.2px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg text-ink antialiased;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numerals line up in columns everywhere they carry meaning. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Respect a system request for less motion. Every transition and animation in
+ * the product is decorative, so all of them go — nothing here conveys meaning
+ * through movement alone.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* The blueprint field behind auth and marketing surfaces. */
+.nv-grid-bg {
+  background-image:
+    linear-gradient(rgb(var(--nv-border) / 0.55) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--nv-border) / 0.55) 1px, transparent 1px);
+  background-size: 44px 44px;
+  background-position: center;
+}
+
+/* A finer field, for the inside of cards and hero panels. */
+.nv-grid-fine {
+  background-image:
+    linear-gradient(rgb(var(--nv-border) / 0.4) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--nv-border) / 0.4) 1px, transparent 1px);
+  background-size: 14px 14px;
+}
+
+/*
+ * Skip link.
+ *
+ * Off-screen until focused. Someone navigating by keyboard should not have to
+ * tab through the whole header on every page to reach the content.
+ */
+.nv-skip-link {
+  @apply sr-only;
+}
+.nv-skip-link:focus {
+  @apply not-sr-only fixed left-4 top-4 z-[100] rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-fg shadow-pop;
+}
+
+@layer components {
+  /* ── Buttons ───────────────────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold
+           transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70
+           focus-visible:ring-offset-2 focus-visible:ring-offset-bg
+           disabled:cursor-not-allowed disabled:opacity-45;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-primary-fg shadow-btn hover:bg-primary-strong active:translate-y-px;
+  }
+  .btn-secondary {
+    @apply btn border border-line bg-surface text-ink shadow-xs hover:border-line-strong hover:bg-surface-muted active:translate-y-px;
+  }
+  .btn-ghost {
+    @apply btn text-ink-muted hover:bg-surface-muted hover:text-ink;
+  }
+  .btn-danger {
+    @apply btn border border-danger/30 bg-danger-soft text-danger hover:border-danger/50 hover:bg-danger/15;
+  }
+  .btn-sm {
+    @apply gap-1.5 px-2.5 py-1.5 text-xs;
+  }
+  .btn-lg {
+    @apply px-5 py-2.5 text-base;
+  }
+
+  .icon-btn {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface
+           text-ink-muted transition duration-150 hover:border-line-strong hover:bg-surface-muted hover:text-ink
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70
+           disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  /* Borderless variant, for dense toolbars where a grid of boxes reads busy. */
+  .icon-btn-bare {
+    @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-muted
+           transition duration-150 hover:bg-surface-muted hover:text-ink
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70
+           disabled:cursor-not-allowed disabled:opacity-35;
+  }
+
+  /* ── Form ──────────────────────────────────────────────────────────── */
+  .input {
+    @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink shadow-xs
+           placeholder:text-ink-subtle transition duration-150
+           focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25
+           disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-subtle;
+  }
+  .select {
+    @apply input appearance-none pr-8;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-semibold text-ink-muted;
+  }
+  .field-error {
+    @apply mt-1 text-xs text-danger;
+  }
+  /* The one-line explanation that sits under a control. */
+  .field-hint {
+    @apply mt-1 text-[11px] leading-snug text-ink-subtle;
+  }
+
+  /* ── Containers ────────────────────────────────────────────────────── */
+  .panel {
+    @apply rounded-xl border border-line bg-surface shadow-card;
+  }
+  .card {
+    @apply rounded-xl border border-line bg-surface p-4 shadow-xs;
+  }
+  .card-hover {
+    @apply card transition duration-150 hover:-translate-y-0.5 hover:border-line-strong hover:shadow-card;
+  }
+
+  /* ── Notices ───────────────────────────────────────────────────────── */
+  .notice {
+    @apply rounded-lg border px-3 py-2 text-sm;
+  }
+  .notice-neutral {
+    @apply notice border-line bg-surface-muted text-ink-muted;
+  }
+  .notice-success {
+    @apply notice border-success/25 bg-success-soft text-success;
+  }
+  .notice-warning {
+    @apply notice border-warning/25 bg-warning-soft text-warning;
+  }
+  .notice-error {
+    @apply notice border-danger/25 bg-danger-soft text-danger;
+  }
+  .notice-info {
+    @apply notice border-info/25 bg-info-soft text-info;
+  }
+
+  /* ── Editor-specific: denser than the rest of the app on purpose ───── */
+  .ed-panel {
+    @apply flex flex-col border-line bg-surface;
+  }
+  .ed-section {
+    @apply border-b border-line px-3.5 py-3;
+  }
+  .ed-section-title {
+    @apply mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-subtle;
+  }
+  .ed-field {
+    @apply w-full rounded-md border border-line bg-surface px-2 py-1.5 text-xs text-ink shadow-xs
+           transition duration-150 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20;
+  }
+  .ed-label {
+    @apply mb-1 block text-[10px] font-semibold uppercase tracking-wide text-ink-subtle;
+  }
+  .ed-action {
+    @apply inline-flex select-none items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold
+           text-ink-muted transition duration-150 hover:bg-surface-muted hover:text-ink
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70
+           disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .ed-action-primary {
+    @apply ed-action bg-primary text-primary-fg shadow-btn hover:bg-primary-strong hover:text-primary-fg;
+  }
+  .ed-segment {
+    @apply inline-flex rounded-lg border border-line bg-surface-muted p-0.5;
+  }
+  .ed-segment-btn {
+    @apply rounded-md px-2.5 py-1 text-[11px] font-semibold text-ink-muted transition duration-150 hover:text-ink
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70;
+  }
+  .ed-segment-btn-active {
+    @apply bg-surface text-primary shadow-xs hover:text-primary;
+  }
+  .ed-item-card {
+    @apply flex cursor-grab items-center gap-2.5 rounded-lg border border-transparent p-2
+           text-left transition duration-150 hover:border-line hover:bg-surface-muted active:cursor-grabbing;
+  }
+  .ed-item-card-active {
+    @apply border-primary/50 bg-primary-soft;
+  }
+  .ed-item-card-locked {
+    @apply cursor-not-allowed opacity-50 hover:border-transparent hover:bg-transparent;
+  }
+  .ed-thumb {
+    @apply h-10 w-10 shrink-0 overflow-hidden rounded-md border border-line bg-surface-muted object-cover;
+  }
+
+  /* ── The icon rail: the editor's primary navigation ────────────────── */
+  .rail-btn {
+    @apply relative flex w-full flex-col items-center gap-1 rounded-lg px-1 py-2.5 text-[10px] font-semibold
+           text-ink-subtle transition duration-150 hover:bg-surface-muted hover:text-ink
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70;
+  }
+  .rail-btn-active {
+    @apply bg-primary-soft text-primary hover:bg-primary-soft hover:text-primary;
+  }
+  /* The 2px marker that says which rail item owns the panel beside it. */
+  .rail-btn-active::before {
+    content: '';
+    @apply absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full bg-primary;
+  }
+
+  /* ── Data ──────────────────────────────────────────────────────────── */
+  .stat-tile {
+    @apply rounded-lg border border-line bg-surface px-3 py-2.5 shadow-xs;
+  }
+  .stat-value {
+    @apply text-lg font-bold tabular-nums leading-tight text-ink;
+  }
+  .stat-label {
+    @apply mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-subtle;
+  }
+  .table-head {
+    @apply border-b border-line text-left text-[11px] font-bold uppercase tracking-wide text-ink-subtle;
+  }
+  .table-row {
+    @apply border-b border-line text-sm text-ink-muted transition duration-150 hover:bg-surface-muted;
+  }
+
+  /* ── Chips and badges ──────────────────────────────────────────────── */
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-line bg-surface
+           px-2 py-0.5 text-[11px] font-medium text-ink-muted;
+  }
+  .chip-active {
+    @apply border-primary/40 bg-primary-soft text-primary;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide;
+  }
+  .badge-success {
+    @apply badge bg-success-soft text-success;
+  }
+  .badge-warning {
+    @apply badge bg-warning-soft text-warning;
+  }
+  .badge-danger {
+    @apply badge bg-danger-soft text-danger;
+  }
+  .badge-info {
+    @apply badge bg-info-soft text-info;
+  }
+  .badge-neutral {
+    @apply badge bg-surface-muted text-ink-muted;
+  }
+}
+
+/* Thin scrollbars — the editor has a lot of them. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--nv-border-strong)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--nv-border-strong) / 0.85);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--nv-text-subtle) / 0.8);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/*
+ * Comfortable density.
+ *
+ * The editor defaults to compact because it is a tool people spend hours in and
+ * screen space is the scarce resource. Comfortable is for anyone who finds that
+ * hard to hit or hard to read — larger targets throughout, applied by widening
+ * the editor's own controls rather than by scaling the whole page, which would
+ * also scale the 3D viewport.
+ */
+:root[data-density='comfortable'] .ed-action,
+:root[data-density='comfortable'] .ed-segment-btn {
+  @apply px-3 py-2 text-xs;
+}
+:root[data-density='comfortable'] .ed-field {
+  @apply px-3 py-2 text-sm;
+}
+:root[data-density='comfortable'] .ed-section {
+  @apply px-4 py-4;
+}
+:root[data-density='comfortable'] .ed-item-card {
+  @apply gap-3 p-2.5;
+}
+:root[data-density='comfortable'] .rail-btn {
+  @apply py-3 text-[11px];
+}
+
+/* ── Motion ──────────────────────────────────────────────────────────── */
+
+/* A pulse used once, to point at the thing the guided tour is talking about. */
+@keyframes nv-attention {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--nv-primary) / 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 9px rgb(var(--nv-primary) / 0);
+  }
+}
+.nv-attention {
+  animation: nv-attention 1.8s ease-out 3;
+  border-radius: 0.5rem;
+}
+
+/* The sweep across a skeleton, so loading reads as progress not as broken. */
+@keyframes nv-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.nv-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.nv-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    rgb(var(--nv-surface) / 0.75),
+    transparent
+  );
+  animation: nv-shimmer 1.4s infinite;
+}
+
+/* Panels and popovers arrive rather than appear. */
+@keyframes nv-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.nv-rise {
+  animation: nv-rise 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes nv-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.nv-fade {
+  animation: nv-fade 0.2s ease-out both;
+}
+
+/* Staggered entrance for a list or grid. Set --nv-i on each child. */
+.nv-stagger > * {
+  animation: nv-rise 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--nv-i, 0) * 55ms);
+}
+
+/*
+ * A horizontal strip that has more to the right than fits.
+ *
+ * The fade is the affordance — a hard edge looks like the end of the content,
+ * a fade looks like there is more, and that difference is the whole reason
+ * people scroll the strip at all.
+ */
+.nv-edge-fade-x {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 24px), transparent);
+}
+
+/*
+ * The endless strip.
+ *
+ * Translated by exactly half the track's width, which is why the content is
+ * duplicated once: at -50 % the second copy sits exactly where the first
+ * started, so the loop has no seam. Animating to -100 % is the common mistake
+ * and produces a visible jump every cycle.
+ */
+@keyframes nv-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* A slow drift for decorative gradients behind a hero. */
+@keyframes nv-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(2%, -3%, 0) scale(1.06);
+  }
+}
+.nv-drift {
+  animation: nv-drift 18s ease-in-out infinite;
+}
+
+/* Hide a scrollbar on a strip that is scrolled with buttons or a wheel. */
+.nv-no-scrollbar {
+  scrollbar-width: none;
+}
+.nv-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

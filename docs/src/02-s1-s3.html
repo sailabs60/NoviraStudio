@@ -1,0 +1,290 @@
+<!-- ============================ 1. EXEC SUMMARY ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 01</span>
+    <h2>Executive summary</h2>
+    <p class="sec-sub">What Event Design App actually is, and what Nozila has to reproduce to compete with it.</p>
+  </div>
+
+  <p class="lede">
+    Event Design App is a browser-native 3D event-design tool sold to the event <em>rental</em> trade.
+    Its real product is not the 3D viewport — plenty of tools have one — but the chain that runs from a
+    photograph of a real rental item, through a to-scale 3D layout, to an output a client signs off on.
+    Everything in the application serves that chain.
+  </p>
+
+  <h3>1.1 The five things that make it hard to copy</h3>
+  <p>
+    A superficial clone is a Three.js canvas with a furniture palette. That is perhaps 15% of the work.
+    The defensible parts, in descending order of difficulty, are:
+  </p>
+
+  <table>
+    <thead><tr><th style="width:34mm">Capability</th><th>Why it is hard</th><th style="width:20mm">Weight</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>The AI pipeline</strong></td>
+        <td>Four distinct asynchronous job types — image→3D mesh, image→photoreal render, floor-plan→wall vectors, photos→navigable 3D venue — each with a third-party provider, a credit charge, idempotency, cancellation, refund-on-failure, polling and history. This is a job-orchestration product wearing a 3D coat.</td>
+        <td>Very high</td>
+      </tr>
+      <tr>
+        <td><strong>The Biljax stage builder</strong></td>
+        <td>Not a parametric box. It models a real modular staging system, derives a bill of materials, and encodes engineering rules — guardrail selection by deck height, cross-bracing every third bay, extra support legs above 36″ stair rise.</td>
+        <td>High</td>
+      </tr>
+      <tr>
+        <td><strong>Scale correctness</strong></td>
+        <td>Two-point floor-plan calibration, Google Maps metres-per-pixel capture, per-item real dimensions, imperial/metric duality. Everything is stored in integer millimetres. Get this wrong and the whole value proposition collapses.</td>
+        <td>High</td>
+      </tr>
+      <tr>
+        <td><strong>Table Designer</strong></td>
+        <td>Generates a full banquet arrangement — table, linen, chairs, and a per-seat place setting of up to eight slotted items — then keeps every clone in sync when the table, chair or layout preset changes.</td>
+        <td>High</td>
+      </tr>
+      <tr>
+        <td><strong>The commercial machinery</strong></td>
+        <td>Three tiers, a metered credit economy with per-action pricing, credit packs with expiry, company seats, shared-vs-individual credit pools, Stripe checkout and portal, manual upgrade approvals, and a cancellation-reason funnel — all administrable from a console.</td>
+        <td>High</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>1.2 Scale of the thing</h3>
+  <div class="grid3">
+    <div class="card">
+      <h4 style="font-size:20pt;color:var(--accent);margin-bottom:0;">22</h4>
+      <p style="font-size:8.2pt;color:var(--ink-3);margin:0;">client routes, of which 6 are public and 3 are administrative</p>
+    </div>
+    <div class="card">
+      <h4 style="font-size:20pt;color:var(--accent);margin-bottom:0;">~180</h4>
+      <p style="font-size:8.2pt;color:var(--ink-3);margin:0;">distinct REST endpoints observed in the shipped bundle</p>
+    </div>
+    <div class="card">
+      <h4 style="font-size:20pt;color:var(--accent);margin-bottom:0;">11</h4>
+      <p style="font-size:8.2pt;color:var(--ink-3);margin:0;">surfaces inside the Super Admin Console alone</p>
+    </div>
+  </div>
+
+  <div class="box fact">
+    <span class="lab">Load-bearing finding</span>
+    <p>
+      The production JavaScript is shipped unminified enough to read: route table, Zustand store shape,
+      axios call signatures, request payload keys, feature-gate codes and the entire administrative
+      vocabulary are all directly observable. <strong>Almost nothing in this document is inference.</strong>
+      Where something <em>is</em> inferred, it is marked as such.
+    </p>
+  </div>
+
+  <h3>1.3 What Nozila should decide early</h3>
+  <ol>
+    <li><strong>Millimetre integers as the storage unit.</strong> Adopt this on day one; retrofitting a unit convention through a geometry engine is brutal. Display unit is a per-user preference, never a storage concern.</li>
+    <li><strong>Async jobs are a first-class subsystem</strong>, not something bolted onto the AI features later. One job table, one status machine, one polling contract, one credit-charge point.</li>
+    <li><strong>Credits are ledger entries, not a counter.</strong> The observed system has cycle grants, purchases with expiry, pool transfers, refunds and CSV export. A single <code>credits_remaining</code> integer cannot express that.</li>
+    <li><strong>The scene is one JSON document per plan</strong>, not a normalised object table. The editor loads and saves it wholesale; relational decomposition of scene objects buys nothing and costs a great deal.</li>
+    <li><strong>Build the admin console alongside the app</strong>, not after. Pricing, credit ratios, onboarding options and the theme are all server-driven — the app cannot be configured without it.</li>
+  </ol>
+</div>
+
+<!-- ============================ 2. RESEARCH METHOD ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 02</span>
+    <h2>Research method &amp; evidence</h2>
+    <p class="sec-sub">Every source used, what it yielded, and the honest limits of the reconstruction.</p>
+  </div>
+
+  <p class="lede">
+    The instruction for this work was to guess nothing. That is achievable to an unusually high degree
+    here, because the application ships a readable client bundle and publishes a detailed knowledge base.
+    This section records exactly where each class of fact came from, so any statement can be re-checked.
+  </p>
+
+  <h3>2.1 Sources, in order of evidential weight</h3>
+  <table>
+    <thead><tr><th style="width:44mm">Source</th><th>What it established</th><th style="width:22mm">Volume</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Production JS bundles</strong><br><span style="color:var(--ink-3);font-size:7.8pt;">go.eventdesignapp.com/assets/*</span></td>
+        <td>Route table, lazy-chunk map, Zustand store defaults, every axios call and its path, request payload keys, feature-gate codes, error strings, analytics event names, the whole admin vocabulary.</td>
+        <td>56 files<br>7.1 MB</td>
+      </tr>
+      <tr>
+        <td><strong>Compiled CSS</strong><br><span style="color:var(--ink-3);font-size:7.8pt;">index-*.css</span></td>
+        <td>The complete <code>--qiso-*</code> design-token set with literal values, and all 57 component class names.</td>
+        <td>150 KB</td>
+      </tr>
+      <tr>
+        <td><strong>Help centre</strong><br><span style="color:var(--ink-3);font-size:7.8pt;">help.eventdesignapp.com</span></td>
+        <td>Step-by-step procedures for 50 workflows across 9 collections — the authoritative source for interaction order, limits, error copy and troubleshooting.</td>
+        <td>50 articles</td>
+      </tr>
+      <tr>
+        <td><strong>Product walkthrough video</strong><br><span style="color:var(--ink-3);font-size:7.8pt;">Loom, 9 min 37 s, 2174×1080</span></td>
+        <td>Actual pixel layout of the editor: panel widths, toolbar contents, modal anatomy, the radial context menu, properties-panel composition, the status legend.</td>
+        <td>144 frames<br>@ 4 s</td>
+      </tr>
+      <tr>
+        <td><strong>Live page capture</strong><br><span style="color:var(--ink-3);font-size:7.8pt;">Playwright, 1440×900</span></td>
+        <td>Current visual state of login, register, guest entry, forgot-password, help centre; confirmed the live theme differs from the CSS default.</td>
+        <td>10 pages</td>
+      </tr>
+      <tr>
+        <td><strong>Marketing site &amp; legal</strong></td>
+        <td>Pricing, tier naming, credit costs, feature claims, corporate entity, governing law, IP-ownership terms.</td>
+        <td>7 pages</td>
+      </tr>
+      <tr>
+        <td><strong>Knowledge-base screenshots</strong></td>
+        <td>Exact modal copy for the import flow and floor-plan calibration, in the <em>current</em> UI generation.</td>
+        <td>8 images</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>2.2 A note on the two UI generations</h3>
+  <p>
+    The walkthrough video and the help-centre screenshots show <strong>different generations of the same
+    product</strong>. The video shows a <em>Table Wizard</em> and an <em>Auto Layout</em> modal with a sky-blue
+    accent; the current bundle and the newer screenshots use <em>Table Designer</em> and <em>Quick Layout</em>
+    with an indigo accent. Where they conflict, this document follows the current bundle and notes the
+    older naming, because the bundle is the live system.
+  </p>
+
+  <div class="box warn">
+    <span class="lab">Limits of this reconstruction</span>
+    <p>
+      All research was conducted <strong>without an authenticated session</strong>. The following are therefore
+      described from code, copy and API signatures rather than from direct observation, and should be
+      confirmed before they are treated as settled:
+    </p>
+    <ul style="margin-bottom:0;">
+      <li>Response body shapes (request payloads are known; responses are inferred from consumer code).</li>
+      <li>The visual composition of the dashboard, project page, subscription modal and admin console.</li>
+      <li>The real catalogue taxonomy and item count.</li>
+      <li>Actual latency and reliability of the four AI job types.</li>
+      <li>Server-side validation rules beyond those surfaced in client error strings.</li>
+    </ul>
+  </div>
+  <p style="font-size:8.6pt;">
+    A single authenticated pass — ideally on a Pro account with company and admin access — would close all
+    five gaps. Section 19 marks which build phases depend on that.
+  </p>
+
+  <h3>2.3 A legal note worth reading before building</h3>
+  <p>
+    The subject’s Terms of Service explicitly prohibit using the platform “to build a competing product or
+    service,” prohibit reverse engineering, and assert company ownership of all generated 3D models and
+    images. This document was assembled from <strong>publicly served assets and published documentation</strong>,
+    which is a different act from using the platform under an accepted agreement — but the distinction
+    matters, and it is a commercial decision rather than a technical one.
+  </p>
+  <p>
+    The concrete, practical implications for Nozila are narrower and worth stating plainly:
+  </p>
+  <ul>
+    <li><strong>Do not reuse their assets.</strong> No 3D models, textures, HDRIs, icons or catalogue imagery. Build or license your own.</li>
+    <li><strong>Do not reuse the trade dress.</strong> Copy the <em>interaction model</em>, which is not protectable, not the exact palette, wording and iconography, which partly is.</li>
+    <li><strong>“Biljax” is a real manufacturer’s brand.</strong> Model the engineering behaviour; do not ship their name on your parts list without an agreement.</li>
+    <li><strong>Rewrite all user-facing copy.</strong> The strings quoted throughout this document are evidence of behaviour, not text to paste.</li>
+  </ul>
+</div>
+
+<!-- ============================ 3. THE PRODUCT ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 03</span>
+    <h2>The product</h2>
+    <p class="sec-sub">Who buys it, what it promises, and how the money works.</p>
+  </div>
+
+  <h3>3.1 Identity</h3>
+  <div class="kv">
+    <div><b>Public product</b><span>Event Design App™ — “AI-Powered 3D Event Visualization”</span></div>
+    <div><b>Internal codename</b><span><code>Qiso</code> — visible throughout the CSS token names, component classes, share-page title and an internal host reference</span></div>
+    <div><b>App document title</b><span>“Event Space Planner”</span></div>
+    <div><b>Legal entity</b><span>Event Design App, LLC — California; venue and governing law Los Angeles County</span></div>
+    <div><b>Parent / affiliate</b><span>“Powered by Rentopian” — an event-rental management ERP; explains the inventory-and-quoting emphasis</span></div>
+    <div><b>Surfaces</b><span><code>eventdesignapp.com</code> marketing · <code>go.eventdesignapp.com</code> application · <code>help.eventdesignapp.com</code> knowledge base</span></div>
+  </div>
+
+  <h3>3.2 The buyer</h3>
+  <p>
+    Marketing copy names the audience repeatedly and consistently: <strong>event rental companies</strong> first,
+    then wedding planners, corporate event teams, decorators, venues, AV and production crews, banquet
+    operators, schools and houses of worship. The onboarding flow asks two questions — “I am a…” and
+    “I mainly design…” — and uses the answer pair to select a starter template, which is a neat signal
+    that the segments genuinely diverge in what they need on day one.
+  </p>
+
+  <h3>3.3 The promise, in the product’s own framing</h3>
+  <p>
+    The homepage organises everything around three verbs — <strong>Design → Visualize → Quote</strong> — and one
+    claim: “Not Just 3D. Connected 3D.” The connection being sold is to the rental company’s own
+    inventory, so that a layout is simultaneously a priced order.
+  </p>
+  <div class="box">
+    <span class="lab">Important gap between marketing and shipped code</span>
+    <p>
+      The marketing site promises <strong>inventory integration and instant itemised quoting</strong> and shows a
+      “$12,450.00 estimated quote” panel. Nothing in the shipped application bundle implements quoting,
+      pricing, line items or inventory sync. There is no quote endpoint, no price field on catalogue items,
+      no order model. Either that capability lives in Rentopian and is reached outside this SPA, or it is
+      aspirational. <strong>Treat quoting as unbuilt in the subject, and therefore as Nozila’s clearest
+      opportunity for genuine differentiation</strong> rather than as a feature to reverse-engineer.
+    </p>
+  </div>
+
+  <h3>3.4 Commercial model</h3>
+  <table>
+    <thead><tr><th style="width:26mm">Tier</th><th style="width:20mm">Marketing name</th><th class="num" style="width:18mm">Price</th><th class="num" style="width:20mm">Credits/mo</th><th>Access</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="pill p-free">Free</span></td><td>The Test Drive</td><td class="num">$0</td><td class="num">0</td>
+        <td>Core design and visualisation, wall drawing, staging, rendering, a starter model set. No AI of any kind. Framed as “for personal practice, not client work.”</td>
+      </tr>
+      <tr>
+        <td><span class="pill p-plus">Plus</span></td><td>The Professional</td><td class="num">$35</td><td class="num">100</td>
+        <td>Everything in Free, plus the full ever-growing model library, AI Image to 3D, Floor Plan AI Draw, AI Enhance, Google Maps import, Venue Generation.</td>
+      </tr>
+      <tr>
+        <td><span class="pill p-pro">Pro</span></td><td>The Power User</td><td class="num">$59</td><td class="num">200</td>
+        <td>Identical toolset and library to Plus. The <em>only</em> difference is the credit allowance.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="box fact">
+    <span class="lab">The pricing insight</span>
+    <p>
+      Pro is not a feature tier — it is a <strong>capacity tier</strong>. Plus and Pro have the same toolset and the
+      same library; Pro simply doubles the credits. The product therefore monetises AI compute, not
+      software access, and the entire commercial design follows from that: metered credits, purchasable
+      packs, per-action pricing that an administrator can retune, and a company-level shared pool.
+    </p>
+  </div>
+
+  <h4>Credit costs per action</h4>
+  <table class="tight">
+    <thead><tr><th>Action</th><th style="width:26mm">Feature code</th><th class="num" style="width:16mm">Credits</th><th>Charge point</th></tr></thead>
+    <tbody>
+      <tr><td>AI Image to 3D</td><td><code>ai_image_to_3d</code></td><td class="num">10</td><td>On generation start</td></tr>
+      <tr><td>Floor Plan AI Draw</td><td><code>floor_plan_ai_draw</code></td><td class="num">3</td><td>When AI traces walls</td></tr>
+      <tr><td>AI Enhance (default model)</td><td><code>ai_enhance</code></td><td class="num">2</td><td>On enhance run</td></tr>
+      <tr><td>AI Enhance (pro model)</td><td><code>ai_enhance_nano_banana_2</code></td><td class="num">admin-set</td><td>On enhance run, when pro model selected</td></tr>
+      <tr><td>AI Enhance (alternate)</td><td><code>ai_enhance_qwen</code></td><td class="num">admin-set</td><td>On enhance run</td></tr>
+      <tr><td>Google Maps import</td><td><code>google_maps</code></td><td class="num">1</td><td>Only <em>after</em> a successful import</td></tr>
+      <tr><td>Venue Generation</td><td><code>venue_generation</code></td><td class="num">admin-set</td><td>When the run is queued; refunded on cancel</td></tr>
+    </tbody>
+  </table>
+  <p class="src">Costs 10 / 3 / 2 / 1 are stated on the marketing site; all seven codes and their administrator descriptions come from the admin console bundle. Every value is editable at runtime via <code>/admin/subscription-credit-ratios</code>.</p>
+
+  <h3>3.5 Where it sits competitively</h3>
+  <p>
+    Against generic floor-plan tools (Social Tables, AllSeated, Prismm) the differentiator is the three
+    domain builders — tent, stage, drape — and the AI asset pipeline. Against architectural
+    visualisation (Twinmotion, Enscape, D5) the differentiator is that it runs in a browser, needs no
+    modelling skill, and speaks rental-industry vocabulary. Nozila’s opening is the one the subject has
+    left unbuilt: <strong>actually closing the loop to a priced, signable quote.</strong>
+  </p>
+</div>

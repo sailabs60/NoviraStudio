@@ -1,0 +1,297 @@
+<!-- ============================ 12. THE THREE BUILDERS ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 12</span>
+    <h2>The three builders</h2>
+    <p class="sec-sub">Tent, stage and drape — the domain-specific parametric objects that set the product apart.</p>
+  </div>
+
+  <p class="lede">
+    These three are what separate the product from a generic furniture-placement tool. Each is a
+    parametric object with a bespoke properties panel, and each encodes real trade knowledge. Budget
+    accordingly — they are individually as much work as the whole catalogue system.
+  </p>
+
+  <h3>12.1 Tent builder</h3>
+  <figure>
+    <img src="img/tent-builder.jpg" alt="Tent builder with sidewall panel">
+    <figcaption><strong>Tent selected, sidewall panel open.</strong> Right panel shows <em>Tent Sidewalls — 6/12 slots filled</em>, Edit/Apply, the selected sidewall type, a <em>Pick Sidewall</em> picker, and Fill All / Clear All. Left panel is filtered to the Tents category, each card giving true dimensions (“Frame Tent 20×30 — 20 feet by 30 feet”).</figcaption>
+  </figure>
+
+  <h4>Tent catalogue</h4>
+  <p>
+    Tents are catalogue items with a dedicated object type (<code>TentObject3D</code>, type slug
+    <code>frame-tent-30×30</code>). Families and sizes observed:
+  </p>
+  <table class="tight">
+    <thead><tr><th style="width:34mm">Family</th><th>Sizes seen in the catalogue</th></tr></thead>
+    <tbody>
+      <tr><td>Frame tents</td><td>20×20 · 20×30 · 20×40 · 30×30 · 30×40 · 40×40 · 40×60</td></tr>
+      <tr><td>Pole tents</td><td>20×20 and up</td></tr>
+      <tr><td>Sailcloth</td><td>Marketing-confirmed</td></tr>
+      <tr><td>High-peak marquee</td><td>Marketing-confirmed</td></tr>
+    </tbody>
+  </table>
+  <p>The marketing site adds: “Need something not in the library? New tent types and custom dimensions can be created for your fleet.” — i.e. bespoke tents are an onboarding service, not a self-serve feature.</p>
+
+  <h4>Sidewall system</h4>
+  <p>
+    A tent exposes a fixed number of <strong>sidewall slots</strong> — one per bay per side — shown as a
+    <code>filled/total</code> counter (“6/12 slots filled”). Slots are highlighted in the 3D scene and clicked to
+    add or remove: “Click slot highlights in scene to add/remove sidewalls.”
+  </p>
+  <ul>
+    <li><strong>Edit</strong> enters slot-editing mode; <strong>Apply</strong> commits.</li>
+    <li><strong>Pick Sidewall</strong> opens a searchable picker of sidewall catalogue items.</li>
+    <li><strong>Fill All</strong> / <strong>Clear All</strong> for bulk work.</li>
+    <li>Slots hold <em>different</em> wall types — the marketing framing is “open one face, glass on another, solid on the rest.”</li>
+  </ul>
+  <p><strong>Sidewall types:</strong> Cathedral · Panoramic · Solid · Structured · Tinted windows · Arch windows · Curtains.</p>
+  <p>
+    Data: <code>selected_sidewall</code>, <code>tent-sidewalls</code> slot array, <code>default-solid-panel</code> fallback.
+    Empty state: “No tent sidewalls found in catalog.” Guard: “Select tent in scene to discover slots.”
+  </p>
+
+  <h4>Interior design</h4>
+  <p>
+    The vinyl canopy can be <strong>hidden</strong> so the interior can be laid out and viewed. Everything else —
+    tables, staging, draping, catalogue items — is placed inside at true scale as normal.
+  </p>
+
+  <h3>12.2 Biljax stage builder</h3>
+  <div class="fig2">
+    <figure>
+      <img src="img/stage-builder-a.jpg" alt="Stage builder footprint controls">
+      <figcaption>Footprint, deck height, stair sides and per-side bay selection.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/stage-builder-b.jpg" alt="Stage builder skirt, guardrail, summary and BOM">
+      <figcaption>Skirt sides, guardrail sides, Summary block and the Derived BOM.</figcaption>
+    </figure>
+  </div>
+
+  <p>
+    Presented as a catalogue item — “Biljax Stage Builder — Procedural Biljax stage builder with 4×4 decks,
+    centered stairs, auto rail selection, and derived BOM output.” Object type <code>biljax-stage</code>.
+  </p>
+
+  <h4>Controls, in panel order</h4>
+  <table class="tight">
+    <thead><tr><th style="width:36mm">Control</th><th>Behaviour and exact helper text</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Footprint</strong></td><td><em>Rows</em> and <em>Columns</em> of 4′×4′ decks → <em>Apply Footprint</em>. Readout: “6 × 6 decks, each 4.00ft”.</td></tr>
+      <tr><td><strong>Deck Height (in)</strong></td><td>Numeric + <em>Apply</em>. “Height snaps to 1″ increments.”</td></tr>
+      <tr><td><strong>Stair Sides</strong></td><td>North / East / South / West toggles. “Selected sides can place one stair on any 4′ bay along that edge.”</td></tr>
+      <tr><td><strong>{Side} Stair Bay</strong></td><td>A numbered segmented control (1…n) per selected side. “Click a bay segment to move the stair opening on the east side.”</td></tr>
+      <tr><td><strong>Stage Skirt Sides</strong></td><td>N/E/S/W. “Skirt panels drape each selected exposed side and leave an automatic opening where stairs are placed.”</td></tr>
+      <tr><td><strong>Guardrail Sides</strong></td><td>N/E/S/W. Rail <em>type</em> is chosen automatically by height.</td></tr>
+      <tr><td><strong>Summary</strong></td><td>“Footprint: 24.00ft × 24.00ft / Rail type: Horizontal guard panel / Stair model: Biljax Ultra-Stair (3-Step)”</td></tr>
+      <tr><td><strong>Derived BOM</strong></td><td>Live parts list — e.g. “Biljax 4′ × 4′ Deck … 36”</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Parts catalogue</h4>
+  <table class="tight">
+    <thead><tr><th style="width:56mm">Part</th><th>Description as shipped</th></tr></thead>
+    <tbody>
+      <tr><td>Biljax 4′ × 4′ Deck</td><td>“Primary Biljax staging platform deck.”</td></tr>
+      <tr><td>Biljax Stage Leg</td><td>—</td></tr>
+      <tr><td>Biljax Stair Support Leg</td><td>—</td></tr>
+      <tr><td>Biljax Snap Pin</td><td>“Snap pins for the primary stage legs.” / “…for stage legs and stair support legs.”</td></tr>
+      <tr><td>Biljax Rubber Base Pad</td><td>“Rubber base pads for the primary stage legs.”</td></tr>
+      <tr><td>Biljax Vertical Guardrail</td><td>Auto-selected above 30″</td></tr>
+      <tr><td>Biljax Horizontal Guard Panel</td><td>Auto-selected at or below 30″</td></tr>
+      <tr><td>Biljax Ultra-Stair</td><td>3-, 4-, 6-, 8- and 10-step variants</td></tr>
+      <tr><td>Stage Skirt 4′ Section</td><td>“Pleated black stage skirt section for a single exposed 4-foot bay.”</td></tr>
+    </tbody>
+  </table>
+
+  <div class="box fact">
+    <span class="lab">The engineering rules — verbatim from the product</span>
+    <ul style="margin-bottom:0;">
+      <li>“Auto-selected for stage heights above 30″.” / “…at or below 30″.” — guardrail type by deck height</li>
+      <li>“Cross braces are required: brace each corner and every third bay with <strong>2</strong> braces per braced bay.”</li>
+      <li>“Cross braces are required: brace each corner and every third bay with <strong>3</strong> braces per braced bay.” — a higher-height variant</li>
+      <li>“Each stair requires <strong>2 additional support legs and 2 additional snap pins</strong> above 36″.”</li>
+      <li>“Additional support legs required for stairs above 36″.”</li>
+      <li>“Selected stair sides require a supported Biljax Ultra-Stair height between <strong>12″ and 70″</strong>.”</li>
+      <li>“…on exposed edges. Add railing on: {sides}” / “Consider adding railing on: {sides}” — required vs advisory</li>
+    </ul>
+  </div>
+
+  <div class="box risk">
+    <span class="lab">Commercial and safety caution for Nozila</span>
+    <p>
+      Biljax is a real manufacturer. Shipping their brand name, part names and load rules implies an
+      endorsement the subject may or may not have. Two consequences for Nozila:
+    </p>
+    <ul style="margin-bottom:0;">
+      <li>Model the <em>behaviour</em> — modular decking, height-driven railing, bay-aligned stairs, derived
+        BOM — under generic naming, or secure a manufacturer agreement before using their marks.</li>
+      <li>Whatever the naming, put a visible disclaimer on BOM output. A parts list that a crew treats as
+        engineering-approved is a liability surface, and the subject’s own terms already disclaim
+        dimensional accuracy for exactly this reason.</li>
+    </ul>
+  </div>
+
+  <h3>12.3 Procedural curtain / draping</h3>
+  <figure>
+    <img src="img/curtain-panel.jpg" alt="Curtain shape panel with anchor handles">
+    <figcaption><strong>Procedural curtain.</strong> Nine white anchor handles on red guide lines let the fabric be shaped directly in the viewport, while the right panel exposes the same parameters numerically. Note the admin performance overlay top-left and the “Procedural Curtain — Adjustable procedural pleated curtain/backdrop” catalogue card.</figcaption>
+  </figure>
+
+  <h4>Curtain Shape parameters</h4>
+  <table class="tight">
+    <thead><tr><th style="width:38mm">Field</th><th style="width:20mm">Example</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Top Width (m)</td><td>4.75</td><td><code>top_width_mm</code></td></tr>
+      <tr><td>Bottom Width (m)</td><td>2.44</td><td><code>bottom_width_mm</code></td></tr>
+      <tr><td>Middle Width (m)</td><td>—</td><td><code>middle_width_mm</code></td></tr>
+      <tr><td>Height (m)</td><td>2.51</td><td>—</td></tr>
+      <tr><td>Curve Depth (m)</td><td>0.00</td><td><code>curve_depth_mm</code> — bow of the run in plan</td></tr>
+      <tr><td>Middle Bend (m)</td><td>-0.51</td><td><code>middle_curve_mm</code> — signed centre bend</td></tr>
+      <tr><td>Folds</td><td>23</td><td><code>fold_count</code> — pleat count</td></tr>
+      <tr><td>Fold Amp. (m)</td><td>0.10</td><td><code>fold_amplitude_mm</code> — pleat depth</td></tr>
+      <tr><td>Orientation</td><td>Vertical | Horizontal</td><td>Segmented control</td></tr>
+      <tr><td>Appearance</td><td>texture | colour</td><td>Two icon options plus “Color only”</td></tr>
+      <tr><td>Fill Opacity</td><td>95%</td><td>Slider — enables sheer/translucent fabrics</td></tr>
+    </tbody>
+  </table>
+  <p>A live summary restates the configuration: “Top 4.75m / bottom 2.44m / height 2.51m · 23 folds, 0.10m amplitude”.</p>
+
+  <h4>Direct manipulation — nine anchors</h4>
+  <p>
+    The curtain carries a 3×3 handle grid (<code>top/middle/bottom</code> × <code>left/centre/right</code>), stored as
+    six extent fields plus three widths: <code>top_left_extent_mm</code>, <code>top_right_extent_mm</code>,
+    <code>middle_left_extent_mm</code>, <code>middle_right_extent_mm</code>, <code>bottom_left_extent_mm</code>,
+    <code>bottom_right_extent_mm</code>.
+  </p>
+  <ul>
+    <li>Dragging a left or right handle changes that row’s width <strong>symmetrically</strong>.</li>
+    <li>Middle-column handles adjust the top curve, bottom curve and centre bend; dragging the top row can also change height.</li>
+    <li><strong>Double-click a non-middle handle</strong> to enter single-point edit and move one side only. UI hint: “Single-point edit · Drag anchor · Esc to exit”.</li>
+    <li>Minimum width and height limits prevent collapse to an unusable size.</li>
+  </ul>
+  <p>Use cases named by the product: pipe-and-drape, ceiling drapes, wall draping, ceremony backdrops, room dividers, fabric installations.</p>
+</div>
+
+<!-- ============================ 13. SITE CONTEXT ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 13</span>
+    <h2>Site context tools</h2>
+    <p class="sec-sub">Getting the real world into the scene: floor plans, backgrounds and aerial maps.</p>
+  </div>
+
+  <h3>13.1 The import flow chooser</h3>
+  <figure style="max-width:80mm;margin-left:auto;margin-right:auto;">
+    <img src="img/import-flow.png" alt="Choose import flow modal">
+    <figcaption><strong>“Choose import flow”</strong> — three clearly differentiated options with one-line explanations. Reached from the upload icon in the bottom toolbar.</figcaption>
+  </figure>
+  <ul>
+    <li><strong>Upload Background</strong> — “Use the image as a scene background.”</li>
+    <li><strong>Import Floor Plan</strong> — “Calibrate scale and trace walls.”</li>
+    <li><strong>Import from Google Maps</strong> — “Search a place and capture a map snapshot.”</li>
+  </ul>
+  <p>
+    The import button is hidden entirely in view-only and shared guest links — an access decision, not
+    just a disabled state.
+  </p>
+
+  <h3>13.2 Background image</h3>
+  <table class="tight">
+    <tbody>
+      <tr><td style="width:36mm"><strong>Formats</strong></td><td>PNG, JPG, WebP, GIF, SVG</td></tr>
+      <tr><td><strong>Max size</strong></td><td>10 MB</td></tr>
+      <tr><td><strong>Placement</strong></td><td>None — “the image is applied as soon as the upload finishes. There is no placement step.”</td></tr>
+      <tr><td><strong>Behaviour</strong></td><td>Fills the canvas behind the scene in <em>both</em> 2D top view and 3D. Included in exports and renders. <strong>Not</strong> on the floor plane, and not moved, scaled, rotated or faded.</td></tr>
+      <tr><td><strong>Replacement</strong></td><td>Uploading a new background replaces the current one <em>and deletes the old file</em>.</td></tr>
+      <tr><td><strong>Removal</strong></td><td>Trash icon → Remove Background → confirm. Deletes the uploaded file too.</td></tr>
+      <tr><td><strong>Gotcha</strong></td><td>Isolate mode hides the background and the floor plan — a documented support issue.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>13.3 Floor plan import and calibration</h3>
+  <p>
+    This is the feature that makes everything else trustworthy, and the help centre documents it in more
+    detail than anything else in the product.
+  </p>
+
+  <figure>
+    <img src="img/set-scale.jpg" alt="Set scale modal">
+    <figcaption><strong>Two-point calibration.</strong> The drawing sits left; the right rail explains the task, shows the measured pixel distance (“Selected length”), takes the real distance with a unit select, and offers Reset points / Back / Manual Draw / AI Draw. Manual and AI Draw stay disabled until two points and a positive distance exist.</figcaption>
+  </figure>
+
+  <h4>Step sequence</h4>
+  <ol>
+    <li><strong>Upload</strong> — PNG, JPG, WebP, GIF or SVG; 10 MB max. Preview shown with a <em>Replace image</em> option.</li>
+    <li><strong>Set scale</strong> — click one end of a known distance (a blue dot appears), then the other (a blue line joins them and the pixel distance is shown). Type the <strong>Real distance</strong> and pick a unit — m, cm, ft or in.
+      <ul>
+        <li>A third click restarts from a new first point; <em>Reset points</em> clears both.</li>
+        <li>Guidance worth reproducing: <em>use the longest measurement you are confident about, since calibrating off a short segment multiplies any click error across the whole plan.</em> A dimension line or printed scale bar is most reliable.</li>
+      </ul>
+    </li>
+    <li><strong>Choose wall creation</strong> — Manual Draw or AI Draw.</li>
+    <li><strong>Trace</strong> — after Manual Draw the drawing is placed <strong>dimmed, centred and locked</strong> so it cannot be moved or selected by accident, and the view switches to Top.</li>
+  </ol>
+
+  <h4>Validation and error copy</h4>
+  <ul>
+    <li>“Select two points to continue.” and “Enter a valid distance.” appear beneath the fields.</li>
+    <li>“AI Draw supports PNG, JPG, WEBP, or GIF” — <strong>SVG is rejected for AI Draw</strong> (raster only); Manual Draw accepts it.</li>
+    <li>“AI could not find usable wall segments.” → the drawing is too faint, noisy or low-resolution.</li>
+    <li>Scale is stored <strong>per image</strong>: a replacement drawing needs a fresh calibration.</li>
+  </ul>
+
+  <h4>Manual Draw vs AI Draw</h4>
+  <table class="tight">
+    <thead><tr><th style="width:26mm"></th><th style="width:38mm">Manual Draw</th><th>AI Draw</th></tr></thead>
+    <tbody>
+      <tr><td>Availability</td><td>Free on every plan</td><td>Plus or Pro, and consumes credits (3)</td></tr>
+      <tr><td>Input</td><td>Any supported image incl. SVG</td><td>Raster only</td></tr>
+      <tr><td>Process</td><td>You trace with the wall tool</td><td>Async job with a status panel: “Starting AI Draw worker…”, “Waiting for AI Draw worker…”, “AI Draw running”, “AI Draw complete”</td></tr>
+      <tr><td>Result</td><td>Exactly what you drew</td><td>“AI walls added. Review before saving.”</td></tr>
+      <tr><td>Failure</td><td>—</td><td>Always falls back: “Continue with Manual Draw or try a clearer raster image.”</td></tr>
+    </tbody>
+  </table>
+  <div class="box">
+    <span class="lab">Pattern to copy</span>
+    <p>
+      Every AI feature here has a <strong>free manual equivalent that the failure path routes to</strong>. The AI is an
+      accelerator, never a dependency. That single decision is why an AI provider outage degrades this
+      product instead of breaking it.
+    </p>
+  </div>
+
+  <h3>13.4 Google Maps import</h3>
+  <figure>
+    <img src="img/google-maps.jpg" alt="Import from Google Maps modal">
+    <figcaption><strong>Aerial capture at true scale.</strong> Address search with autocomplete and a <em>Use visible area</em> shortcut, an interactive map with a selection rectangle, and a right rail for map type, output size, density and a live readout of centre coordinates, zoom and <strong>metres per pixel</strong> — the value that makes the capture measurable.</figcaption>
+  </figure>
+  <table class="tight">
+    <thead><tr><th style="width:36mm">Control</th><th>Detail</th></tr></thead>
+    <tbody>
+      <tr><td>Place search</td><td>“Search a place or address” with Places autocomplete. Fallback: “Address suggestions are unavailable. Enter the address manually.” Guard: “Select a place that has location data.”</td></tr>
+      <tr><td>Use visible area</td><td>Captures the current viewport instead of a searched place</td></tr>
+      <tr><td>Map type</td><td>Satellite · Roadmap · Terrain (“Map”)</td></tr>
+      <tr><td>Output size</td><td>e.g. 1024 × 1024, with the effective pixel output shown (“Output: 2048 × 2048 px”)</td></tr>
+      <tr><td>Density (scale)</td><td>1× / 2× — the Static Maps scale multiplier</td></tr>
+      <tr><td>Selection readout</td><td><strong>Center</strong> lat/lng · <strong>Zoom</strong> · <strong>Meters/px</strong></td></tr>
+      <tr><td>Credits</td><td>1 credit, charged <em>only after a successful import</em></td></tr>
+      <tr><td>Errors</td><td>“Failed to load Google Maps.” · “Invalid Google Maps response” · “Failed to import Google Maps image.” · “Map is not ready yet.”</td></tr>
+    </tbody>
+  </table>
+  <p>
+    The capture is performed server-side (<code>POST /uploads/google-maps-static</code>), which keeps the
+    signing key private and lets the server compute and store <code>scale_world_per_px</code> so the image lands
+    in the scene at true scale with no calibration step.
+  </p>
+  <div class="box warn">
+    <span class="lab">Licensing note</span>
+    <p>
+      Google Maps Platform terms restrict how Static Maps imagery may be stored, modified and
+      redistributed — and an event render sent to a client is redistribution. Check the current terms
+      before shipping this, and budget for attribution being required on exports.
+    </p>
+  </div>
+</div>

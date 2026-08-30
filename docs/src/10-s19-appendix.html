@@ -1,0 +1,434 @@
+<!-- ============================ 19. BUILD PLAN ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 19</span>
+    <h2>Build plan</h2>
+    <p class="sec-sub">Phasing, sequencing risk, and what to cut.</p>
+  </div>
+
+  <h3>19.1 Phases</h3>
+  <table>
+    <thead><tr><th style="width:8mm">#</th><th style="width:38mm">Phase</th><th>Contents</th><th style="width:18mm">Shape</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>0</strong></td><td><strong>Foundations</strong></td>
+        <td>MySQL schema · auth (email + Google, verification, reset) · users, companies, roles · theme tokens and server-driven config · the admin console shell with Users, Companies and Theme · object storage · CI</td>
+        <td>Large</td>
+      </tr>
+      <tr>
+        <td><strong>1</strong></td><td><strong>Workspace</strong></td>
+        <td>Dashboard · projects · plans · plan CRUD · scene document read/write · save and autosave · account settings and unit preference</td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td><strong>2</strong></td><td><strong>Editor core</strong></td>
+        <td>r3f canvas · top/perspective cameras · grid and snapping · selection and box-select · transform gizmos · undo/redo · isolate, lock, focus · lighting with HDRI presets · properties panel framework</td>
+        <td>Very large</td>
+      </tr>
+      <tr>
+        <td><strong>3</strong></td><td><strong>Catalogue</strong></td>
+        <td>Categories and items · search and infinite scroll · GLTF loading and caching · drag-to-place · dimensions and scale correctness · texture variations · per-material tinting · admin upload</td>
+        <td>Large</td>
+      </tr>
+      <tr>
+        <td><strong>4</strong></td><td><strong>Layout tools</strong></td>
+        <td>Quick Layout presets · Line Placement · procedural shapes · <strong>Table Designer with place settings</strong></td>
+        <td>Large</td>
+      </tr>
+      <tr>
+        <td><strong>5</strong></td><td><strong>Structure</strong></td>
+        <td>Wall drawing and blueprint · Quick Room · wall/floor styling · doors and windows as openings</td>
+        <td>Large</td>
+      </tr>
+      <tr>
+        <td><strong>6</strong></td><td><strong>Site context</strong></td>
+        <td>Background upload · floor-plan import with two-point calibration · Manual Draw · Google Maps capture</td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td><strong>7</strong></td><td><strong>Output</strong></td>
+        <td>PNG and PDF export · share tokens · iframe embed · templates · collections</td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td><strong>8</strong></td><td><strong>Commerce</strong></td>
+        <td>Tiers and gating · credit ledger · Stripe checkout and portal · credit packs · cancellation flow · admin pricing, quotas, ratios and packs</td>
+        <td>Large</td>
+      </tr>
+      <tr>
+        <td><strong>9</strong></td><td><strong>AI suite</strong></td>
+        <td>Job subsystem · AI Enhance · Image-to-3D with model transform · Floor Plan AI Draw · admin AI reports</td>
+        <td>Large</td>
+      </tr>
+      <tr>
+        <td><strong>10</strong></td><td><strong>Teams</strong></td>
+        <td>Company seats · invitations · roles and visibility · shared credit pool · company dashboard · credit history and CSV</td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td><strong>11</strong></td><td><strong>Domain builders</strong></td>
+        <td>Tent with sidewall slots · modular stage with derived BOM · procedural curtain with anchor handles</td>
+        <td>Large</td>
+      </tr>
+      <tr>
+        <td><strong>12</strong></td><td><strong>Differentiators</strong></td>
+        <td><strong>Quoting and inventory</strong> · video export · guest mode with perspective extraction · onboarding survey and starter templates</td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td><strong>—</strong></td><td><strong>Deferred</strong></td>
+        <td>Venue Generator and Gaussian-splat rendering</td>
+        <td>—</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>19.2 Sequencing risks</h3>
+  <table class="tight">
+    <thead><tr><th style="width:44mm">Risk</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Units retrofit.</strong> Starting in floats or metres and moving to integer millimetres later touches every geometry path.</td><td>Fix the convention in phase 0. Write the conversion helpers before the first mesh.</td></tr>
+      <tr><td><strong>Scene schema churn.</strong> Saved plans become unreadable when the document shape changes.</td><td><code>schema_version</code> from the first save, plus a migration runner. Non-negotiable.</td></tr>
+      <tr><td><strong>Credits as a counter.</strong> Refunds, expiry and pool transfers arrive later and the counter cannot express them.</td><td>Ledger from the start, even while only one grant type exists.</td></tr>
+      <tr><td><strong>Admin console deferred.</strong> Pricing and credit ratios end up hard-coded and every change becomes a deploy.</td><td>Ship Users, Companies, Theme and Credit Ratios in phase 0.</td></tr>
+      <tr><td><strong>Table Designer underestimated.</strong> Treated as a modal, it is actually a live-synchronised generative system.</td><td>Model generated sets as parameterised groups from day one, never as loose objects.</td></tr>
+      <tr><td><strong>Catalogue content.</strong> The tool is worthless without models, and the subject’s library is its moat.</td><td>Budget for asset acquisition and Image-to-3D as a content-production tool, not just a customer feature.</td></tr>
+      <tr><td><strong>AI provider volatility.</strong> Models are renamed and deprecated constantly.</td><td>Abstract behind a provider interface; keep the model id in <code>credit_ratio</code> so swaps are configuration.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>19.3 What to confirm with an authenticated pass</h3>
+  <p>
+    Section 2 listed five gaps. Mapped to phases, they gate the following work — everything else can
+    start now:
+  </p>
+  <table class="tight">
+    <thead><tr><th style="width:44mm">Unknown</th><th style="width:22mm">Blocks</th><th>Cheapest way to close it</th></tr></thead>
+    <tbody>
+      <tr><td>Response body shapes</td><td>Phases 1–3</td><td>One authenticated session with the network tab open; 30 minutes</td></tr>
+      <tr><td>Dashboard / project page layout</td><td>Phase 1</td><td>Screenshots after login</td></tr>
+      <tr><td>Subscription modal composition</td><td>Phase 8</td><td>Screenshots on a Plus account</td></tr>
+      <tr><td>Real catalogue taxonomy and volume</td><td>Phase 3</td><td>Read the category dropdown and item counts</td></tr>
+      <tr><td>AI latency and failure rates</td><td>Phase 9</td><td>Run each of the four job types once and time them</td></tr>
+    </tbody>
+  </table>
+  <div class="box">
+    <span class="lab">Open offer</span>
+    <p style="margin-bottom:0;">
+      With account credentials — ideally a Pro account, and separately a company-admin and a super-admin
+      account if they exist — a second pass would close all five gaps and let this document be extended
+      with real response schemas, exact dashboard layouts and measured AI timings.
+    </p>
+  </div>
+
+  <h3>19.4 Recommended cuts for v1</h3>
+  <ul>
+    <li><strong>Venue Generator</strong> — highest cost, least proven, beta in the subject itself.</li>
+    <li><strong>Video export</strong> — browser-dependent, and PNG plus PDF cover the sales conversation.</li>
+    <li><strong>Guest mode</strong> — clever, but it serves a distribution strategy that only matters once customers exist.</li>
+    <li><strong>Global template library and onboarding assignment grid</strong> — ship a single starter template first.</li>
+    <li><strong>Shared credit pool</strong> — per-user credits are enough until teams are actually buying.</li>
+  </ul>
+  <p>
+    Conversely, do <strong>not</strong> cut: unit correctness, the credit ledger, save reliability, and the free manual
+    fallback behind every AI feature. Those four are what make the product trustworthy.
+  </p>
+</div>
+
+<!-- ============================ APPENDICES ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">APPENDIX A</span>
+    <h2>Endpoint index</h2>
+    <p class="sec-sub">Alphabetical quick reference. Full detail in §9.</p>
+  </div>
+  <div class="grid2" style="font-size:7.9pt;font-family:var(--mono);line-height:1.62;">
+    <div>
+      <strong style="font-family:var(--sans);">/admin</strong><br>
+      analytics/dashboard<br>
+      analytics/registered-users<br>
+      analytics/registered-users/{id}/events<br>
+      catalog-reviews<br>
+      catalog-reviews/{id}<br>
+      catalog-reviews/{id}/approve<br>
+      catalog-reviews/{id}/reject<br>
+      companies<br>
+      companies/{id}<br>
+      companies/{id}/users<br>
+      company/projects/{id}/plans<br>
+      company/users<br>
+      company/users/{id}/plans<br>
+      company/users/{id}/projects<br>
+      onboarding/section-1<br>
+      onboarding/section-1/{id}<br>
+      onboarding/section-2<br>
+      onboarding/section-2/{id}<br>
+      onboarding/template-assignments<br>
+      onboarding/template-assignments/grid<br>
+      onboarding/template-assignments/{id}<br>
+      reports/ai-process-runs<br>
+      reports/model-generations<br>
+      reports/venue-generations<br>
+      subscription-billing-prices<br>
+      subscription-cancellation-reasons<br>
+      subscription-cancellation-reasons/{id}<br>
+      subscription-cancellations<br>
+      subscription-credit-packs<br>
+      subscription-credit-ratios<br>
+      subscription-plan-credits<br>
+      subscription-requests<br>
+      subscription-requests/{id}/approve<br>
+      subscription-requests/{id}/reject<br>
+      subscription-users<br>
+      theme<br>
+      users<br>
+      users/{id}<br>
+      users/{id}/impersonate<br>
+      users/{id}/reset-password<br><br>
+
+      <strong style="font-family:var(--sans);">/analytics</strong><br>
+      events · identify · visitor<br><br>
+
+      <strong style="font-family:var(--sans);">/articles</strong><br>
+      by-key/{key}<br><br>
+
+      <strong style="font-family:var(--sans);">/auth</strong><br>
+      forgot · google · login · me<br>
+      me/password · register · reset<br>
+      verify · verification/resend<br>
+      onboarding/section-1<br>
+      onboarding/section-2<br>
+      onboarding/bootstrap-assigned-template<br><br>
+
+      <strong style="font-family:var(--sans);">/catalog</strong><br>
+      categories<br>
+      items<br>
+      items/by-ids<br>
+      items/{id}<br>
+      items/{id}/model<br>
+      items/{id}/texture-variations<br>
+      items/upload-with-model<br>
+      items/{id}/update-with-model<br><br>
+
+      <strong style="font-family:var(--sans);">/collections</strong><br>
+      / · {id}
+    </div>
+    <div>
+      <strong style="font-family:var(--sans);">/company</strong><br>
+      billing/customer-portal<br>
+      billing/expenses<br>
+      convert<br>
+      credits/history<br>
+      credits/history/export<br>
+      invitations/accept<br>
+      invitations/preview<br>
+      logo<br>
+      member-credit-checkout-sessions/{id}/complete<br>
+      members<br>
+      members/{id}<br>
+      members/{id}/credits/checkout-session<br>
+      members/{id}/upgrade<br>
+      members/{id}/upgrade/preview<br>
+      profile<br>
+      seats<br>
+      seats/preview<br>
+      seats/checkout-sessions/{id}/complete<br>
+      settings/credit-mode<br><br>
+
+      <strong style="font-family:var(--sans);">/model-generation</strong><br>
+      history<br>
+      history/{id}<br>
+      save-to-catalog<br>
+      status/{job_id}<br>
+      upload-image-v3<br><br>
+
+      <strong style="font-family:var(--sans);">/plans</strong><br>
+      / · {id} · ?project_id=<br>
+      share/{token}<br>
+      {id}/ai-enhance<br>
+      {id}/ai-enhance/{jobId}<br>
+      {id}/ai-enhance/history<br>
+      {id}/export<br>
+      {id}/floor-plan/ai-draw<br>
+      {id}/floor-plan/ai-draw/{jobId}<br>
+      {id}/share<br>
+      {id}/venue<br>
+      {id}/venue/transform<br>
+      guest/{sessionId}/ai-enhance<br><br>
+
+      <strong style="font-family:var(--sans);">/privacy</strong> &nbsp; consent<br><br>
+
+      <strong style="font-family:var(--sans);">/projects</strong><br>
+      / · {id}<br>
+      {id}/venue-generation-capabilities<br>
+      {id}/venue-generation-runs<br>
+      {id}/venues<br><br>
+
+      <strong style="font-family:var(--sans);">/subscription</strong><br>
+      cancel · cancellation-reasons<br>
+      checkout-session<br>
+      checkout-sessions/{id}/complete<br>
+      checkout-sessions/{id}/complete-onboarding<br>
+      credit-checkout-session<br>
+      credit-checkout-sessions/{id}/complete<br>
+      credit-ratios · customer-portal · pricing<br><br>
+
+      <strong style="font-family:var(--sans);">/templates</strong><br>
+      / · {id} · {id}/apply-to-plan<br><br>
+
+      <strong style="font-family:var(--sans);">/textures</strong><br>
+      assets · assets/{id} · categories · sets<br><br>
+
+      <strong style="font-family:var(--sans);">/theme</strong> &nbsp; config<br><br>
+
+      <strong style="font-family:var(--sans);">/uploads</strong><br>
+      background · google-maps-static · {file_key}<br><br>
+
+      <strong style="font-family:var(--sans);">/venue-generation-runs</strong><br>
+      {id} · {id}/cancel · {id}/finish<br>
+      {id}/generate · {id}/image-revisions<br>
+      {id}/suggestions · {id}/suggestions/skip
+    </div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">APPENDIX B</span>
+    <h2>Interaction &amp; analytics reference</h2>
+  </div>
+
+  <h3>B.1 Keyboard map</h3>
+  <div class="grid2">
+    <div>
+      <table class="tight">
+        <thead><tr><th style="width:30mm">Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><kbd>G</kbd></td><td>Move (also Toggle Grid in the toolbar hint)</td></tr>
+          <tr><td><kbd>R</kbd></td><td>Rotate</td></tr>
+          <tr><td><kbd>E</kbd></td><td>Scale</td></tr>
+          <tr><td><kbd>S</kbd></td><td>Toggle snap</td></tr>
+          <tr><td><kbd>V</kbd></td><td>Select tool</td></tr>
+          <tr><td><kbd>T</kbd></td><td>Top view</td></tr>
+          <tr><td><kbd>P</kbd></td><td>Perspective view</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <table class="tight">
+        <thead><tr><th style="width:30mm">Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><kbd>Del</kbd> / <kbd>Backspace</kbd></td><td>Delete selection</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Deselect · exit single-point edit</td></tr>
+          <tr><td><kbd>Shift</kbd>+drag</td><td>Duplicate</td></tr>
+          <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>Z</kbd></td><td>Undo</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> · <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Redo</td></tr>
+          <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Fly navigation</td></tr>
+          <tr><td>Right-click</td><td>Finish a wall run</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <p class="src">The editor renders this legend permanently at the bottom-right: “G Move, R Rotate, E Scale, S Toggle Snap / Shift+Drag Duplicate, Del Delete, Esc Deselect”.</p>
+
+  <h3>B.2 Analytics events observed</h3>
+  <p style="font-family:var(--mono);font-size:8pt;line-height:1.7;">
+    page_view · registration_started · product_viewed · category_viewed · search_performed ·
+    export_completed · bounds_changed · credit_purchase · credit_success · credit_cancelled ·
+    credit_error · credit_mode_cycle_grant · credit_mode_transfer_in · credit_mode_transfer_out ·
+    subscription_success · subscription_cancelled · subscription_error · stripe_checkout ·
+    venue_generation · venue_dispatch_retrying · ai_enhance · ai_enhance_qwen ·
+    ai_enhance_nano_banana_2 · ai_image_to_3d · floor_plan_ai_draw · google_maps
+  </p>
+  <p style="font-family:var(--mono);font-size:8pt;line-height:1.7;">
+    editor.toolbar.select · select-box · line-placement · shapes · wall-draw · lock-toggle · isolate ·
+    focus-selected · toggle-grid · camera-path-edit · camera-path-play · camera-path-clear ·
+    import-floor-plan · remove-floor-plan &nbsp;|&nbsp;
+    editor.transform.move · rotate · scale · delete &nbsp;|&nbsp;
+    editor.history.undo · redo &nbsp;|&nbsp; editor.view.toggle-top &nbsp;|&nbsp;
+    editor.catalog.ai-image-to-3d
+  </p>
+</div>
+
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">APPENDIX C</span>
+    <h2>Credit &amp; feature-gate matrix</h2>
+  </div>
+  <table>
+    <thead><tr>
+      <th style="width:44mm">Feature</th>
+      <th class="num" style="width:16mm">Credits</th>
+      <th style="width:16mm">Free</th><th style="width:16mm">Plus</th><th style="width:16mm">Pro</th>
+      <th>Additional gates</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>Core editor, transforms, walls, shapes</td><td class="num">0</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>—</td></tr>
+      <tr><td>Starter model set</td><td class="num">0</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Items flagged <code>is_free_plan_available</code></td></tr>
+      <tr><td>Full catalogue library</td><td class="num">0</td><td>—</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Company <code>global_models_enabled</code></td></tr>
+      <tr><td>Global textures</td><td class="num">0</td><td>—</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Company <code>global_textures_enabled</code></td></tr>
+      <tr><td>Manual Draw (floor plan)</td><td class="num">0</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Explicitly free on every plan</td></tr>
+      <tr><td>Background image upload</td><td class="num">0</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Hidden in view-only and guest links</td></tr>
+      <tr><td>Export PDF / PNG</td><td class="num">0</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Plan must be saved for PDF</td></tr>
+      <tr><td>Export Video</td><td class="num">0</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Browser support; camera path required</td></tr>
+      <tr><td>Share link / embed</td><td class="num">0</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Not on read-only plans</td></tr>
+      <tr><td>Templates &amp; collections</td><td class="num">0</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Global scope is admin-only</td></tr>
+      <tr><td><strong>Google Maps import</strong></td><td class="num">1</td><td>—</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Charged only on success; needs configured keys</td></tr>
+      <tr><td><strong>AI Enhance</strong> (default)</td><td class="num">2</td><td>—</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Company enablement</td></tr>
+      <tr><td><strong>AI Enhance</strong> (pro / Qwen)</td><td class="num">admin</td><td>—</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Model selection</td></tr>
+      <tr><td><strong>Floor Plan AI Draw</strong></td><td class="num">3</td><td>—</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Raster input only</td></tr>
+      <tr><td><strong>AI Image to 3D</strong></td><td class="num">10</td><td>—</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Per-account <code>ai_image_to_3d_enabled</code></td></tr>
+      <tr><td><strong>Venue Generation</strong></td><td class="num">admin</td><td>—</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td><code>venue_generation_access_override</code>; provider billing</td></tr>
+      <tr><td>Save model to catalog</td><td class="num">0</td><td>—</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Company/global scope needs asset-management rights</td></tr>
+      <tr><td>Team seats</td><td class="num">$</td><td>—</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Company account; owner or admin role</td></tr>
+      <tr><td>Buy credit packs</td><td class="num">$</td><td>—</td><td><span class="pill p-ok">yes</span></td><td><span class="pill p-ok">yes</span></td><td>Packs must be active</td></tr>
+      <tr><td>Admin console</td><td class="num">—</td><td colspan="3" style="text-align:center;"><span class="pill p-admin">super admin only</span></td><td>Bypasses all plan and credit gating</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">APPENDIX D</span>
+    <h2>Dependency register</h2>
+    <p class="sec-sub">Third-party services in the subject, with recommended positions for Nozila.</p>
+  </div>
+  <table>
+    <thead><tr><th style="width:32mm">Service</th><th style="width:28mm">Role</th><th style="width:22mm">Position</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Stripe</strong></td><td>Billing</td><td>Adopt</td><td>Checkout, Portal, recurring and one-time Prices, seat subscriptions and proration are all exercised here. No credible alternative at this complexity.</td></tr>
+      <tr><td><strong>Google OAuth</strong></td><td>Sign-in</td><td>Adopt</td><td>Low cost, high conversion.</td></tr>
+      <tr><td><strong>Google Maps</strong></td><td>Aerial capture</td><td>Adopt with care</td><td>Keep the key server-side. Review Static Maps terms for storage and redistribution before shipping exports.</td></tr>
+      <tr><td><strong>Sentry</strong></td><td>Errors</td><td>Adopt</td><td>A 3D editor fails in ways logs alone will not explain.</td></tr>
+      <tr><td><strong>Yandex Metrika</strong></td><td>Analytics + replay</td><td><strong>Replace</strong></td><td>Session replay of a paid B2B tool is a privacy and procurement liability. PostHog gives the same insight with a defensible data story.</td></tr>
+      <tr><td><strong>Gleap</strong></td><td>Support, tours, KB</td><td>Adopt or substitute</td><td>The knowledge base is doing real work here — it is how users learn calibration. Whatever tool you pick, budget for writing ~50 articles.</td></tr>
+      <tr><td><strong>World Labs</strong></td><td>Venue generation</td><td><strong>Defer</strong></td><td>Beta, expensive, slow, heaviest client payload in the product.</td></tr>
+      <tr><td><strong>Image-to-3D provider</strong></td><td>Mesh generation</td><td>Adopt, abstracted</td><td>Fast-moving field. Keep model ids in configuration so providers can be swapped without a deploy.</td></tr>
+      <tr><td><strong>Image-to-image model</strong></td><td>AI Enhance</td><td>Adopt, abstracted</td><td>Same reasoning. Offering two tiers at different credit costs is a good pattern to copy.</td></tr>
+      <tr><td><strong>Poly Haven HDRIs</strong></td><td>Lighting</td><td>Adopt</td><td>CC0 — the same twelve environments can be used legitimately.</td></tr>
+      <tr><td><strong>3D model library</strong></td><td>Catalogue content</td><td><strong>Build / license</strong></td><td>The single largest non-engineering cost, and the subject’s real moat. Do not treat it as an afterthought.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="box" style="margin-top:16px;">
+    <span class="lab">Closing note</span>
+    <p>
+      Everything in this document describes what exists today at eventdesignapp.com, evidenced from public
+      assets and published documentation. It is a map of a competitor’s decisions, not a licence to copy
+      their assets, brand or code. The parts worth taking are the <em>decisions</em>: millimetre integers, a
+      credit ledger, one job subsystem, a free manual path behind every AI feature, and an admin console
+      that makes the product configurable without a deploy.
+    </p>
+    <p style="margin-bottom:0;">
+      The part worth doing differently is the one they advertised and never built — turning a finished
+      layout into a priced, signable quote.
+    </p>
+  </div>
+
+  <p style="margin-top:20px;padding-top:9px;border-top:1px solid var(--line);font-size:7.8pt;color:var(--ink-3);text-align:center;">
+    Nozila · Rebuild Specification · compiled 28 August 2026 · no implementation performed
+  </p>
+</div>
+
+</body>
+</html>

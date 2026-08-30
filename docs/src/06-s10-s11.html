@@ -1,0 +1,379 @@
+<!-- ============================ 10. THE EDITOR ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 10</span>
+    <h2>The editor</h2>
+    <p class="sec-sub">Shell, viewport, camera, selection, transforms and history — the 80% of the product.</p>
+  </div>
+
+  <h3>10.1 Shell anatomy</h3>
+  <div class="ascii">┌──────────────────────────────────────────────────────────────────────────────────────┐
+│ ←  Plan title            Templates▾ Save Undo Redo Export▾ Share▾ ✦AI Enhance  ⬤ user▾│  header
+├──────────────┬──────────────────────────────────────────────────┬────────────────────┤
+│ Table        │        ⟦ Move · Rotate · Scale · Delete ⟧        │  Properties        │
+│ Designer     │                                             ⊞    │  N selected        │
+│              │                                                  │  Type: <slug>      │
+│ Catalog  ✦AI │                                                  │ ┌────────────────┐ │
+│ ┌Catalog│Coll│                 3D VIEWPORT                       │ │ AI Renders (n) │ │
+│ │category ▾ │                                                   │ ├────────────────┤ │
+│ │🔍 search  │                                                   │ │ contextual     │ │
+│ ├───────────┤                                                   │ │ builder panel  │ │
+│ │ ▢ item    │                                                   │ ├────────────────┤ │
+│ │ ▢ item    │                                                   │ │ Quick Layout   │ │
+│ │ ▢ item …  │                                             ⊕XYZ   │ ├────────────────┤ │
+│ └───────────┘                                                   │ │ Scene Lighting │ │
+│              │                                                  │ └────────────────┘ │
+├──────────────┴──────────────────────────────────────────────────┴────────────────────┤
+│ ↖ ⬚ ─ △ Wall 🔒 ◎ ⊞ ⬆ 🗑        Units[Imperial|Metric]   G Move R Rotate E Scale …  │  toolbar
+└──────────────────────────────────────────────────────────────────────────────────────┘</div>
+
+  <h4>Header (left → right)</h4>
+  <ul>
+    <li><strong>Back arrow</strong> → “Back to project”</li>
+    <li><strong>Plan title</strong>, inline editable</li>
+    <li><strong>Templates ▾</strong> — Save Template · Load Template · Save as Collection · Edit/Delete Template. Split by scope: <em>My Templates</em> (local, private) and <em>Global Templates</em> (available to every user).</li>
+    <li><strong>Save</strong> — with states <em>Saving… / Saved / Save failed / Retry save</em>. Autosave runs alongside (<em>Autosaved</em> / <em>Autosave failed</em>).</li>
+    <li><strong>Undo · Redo</strong> — disabled when the stack is empty</li>
+    <li><strong>Export ▾</strong> — PDF · PNG · Video</li>
+    <li><strong>Share ▾</strong> — Copy share link · Embed iframe</li>
+    <li><strong>AI Enhance</strong> — visually distinct (gradient), with <em>Enhancing…</em> state</li>
+    <li><strong>User menu</strong> — avatar initials, tier badge (Free/Plus/Pro/Super Admin), name</li>
+  </ul>
+
+  <h4>Left panel</h4>
+  <ul>
+    <li><strong>Table Designer</strong> — full-width primary button, always on top</li>
+    <li><strong>“Catalog”</strong> heading with an <strong>AI Image to 3D</strong> button beside it</li>
+    <li>Tabs: <strong>Catalog</strong> | <strong>Collections</strong></li>
+    <li>Category <code>&lt;select&gt;</code> (“All Categories”, Tents, Stages, Chairs, Beverages, Centerpieces, Dance Floors and Rugs, Decor &amp; Accessories, Armchair, Linens…)</li>
+    <li>Search field with live typeahead suggestions above the result list</li>
+    <li>Item cards: thumbnail, name, and a green sub-line carrying <strong>real dimensions</strong> (e.g. <code>60"D × 60" × 30.25"H</code>) or a descriptor and variation count (<code>4× (4' × 4') Panels · 3 Variations</code>)</li>
+    <li>Infinite scroll — “Scroll to load more”, “Loading more items…”</li>
+    <li>Locked items render in a distinct locked state: “This catalog model is available on Plus and Pro plans.”</li>
+    <li><strong>Admin mode</strong> adds an “Upload Model” button and per-card pencil/trash affordances</li>
+  </ul>
+
+  <h4>Right panel — a stack of contextual cards</h4>
+  <ol>
+    <li><strong>AI Renders (n)</strong> — collapsible; “Review previous AI Enhance results for this plan.” Empty: “No AI renders yet.”</li>
+    <li><strong>Selection</strong> — “N object(s) selected · Type: <em>slug</em>”, or the empty state “Select an object on the canvas to edit transforms, dimensions, and materials.”</li>
+    <li><strong>Contextual editor</strong> — the builder panel for the selected type (§11–12)</li>
+    <li><strong>Quick Layout</strong> — “Creates a Quick Layout arrangement from the selected objects and adds the duplicates to the scene.”</li>
+    <li><strong>Scene Lighting</strong> — “Global controls for the full plan.”</li>
+  </ol>
+
+  <h4>Bottom toolbar</h4>
+  <table class="tight">
+    <thead><tr><th style="width:34mm">Tool</th><th style="width:44mm">Analytics id</th><th>Behaviour</th></tr></thead>
+    <tbody>
+      <tr><td>Select</td><td><code>editor.toolbar.select</code></td><td>Default; single click selects</td></tr>
+      <tr><td>Selection Box</td><td><code>editor.toolbar.select-box</code></td><td>Drag-rectangle multi-select, best in top view</td></tr>
+      <tr><td>Line Placement</td><td><code>editor.toolbar.line-placement</code></td><td>Repeat an item along a line</td></tr>
+      <tr><td>Shapes</td><td><code>editor.toolbar.shapes</code></td><td>Disabled while wall editing is open</td></tr>
+      <tr><td>Wall</td><td><code>editor.toolbar.wall-draw</code></td><td>3D only; opens the Walls panel</td></tr>
+      <tr><td>Lock / Unlock</td><td><code>editor.toolbar.lock-toggle</code></td><td>Prevents accidental movement</td></tr>
+      <tr><td>Isolate</td><td><code>editor.toolbar.isolate</code></td><td>Hides everything else — <em>including floor plan and background</em></td></tr>
+      <tr><td>Focus Selected</td><td><code>editor.toolbar.focus-selected</code></td><td>Frames the selection</td></tr>
+      <tr><td>Toggle Grid</td><td><code>editor.toolbar.toggle-grid</code></td><td>Shortcut <kbd>G</kbd></td></tr>
+      <tr><td>Camera Path</td><td><code>editor.toolbar.camera-path-edit|play|clear</code></td><td>Author a fly-through for video export; unavailable while wall editing</td></tr>
+      <tr><td>Import ▸</td><td><code>editor.toolbar.import-floor-plan</code></td><td>Opens “Choose import flow”</td></tr>
+      <tr><td>Delete ▸</td><td><code>editor.toolbar.remove-floor-plan</code></td><td>Remove Floor Plan / Remove Background</td></tr>
+    </tbody>
+  </table>
+  <p>Right of the toolbar sits a <strong>Units</strong> segmented control (Imperial | Metric) and a persistent keyboard legend.</p>
+
+  <h3>10.2 Editor state — the actual Zustand store</h3>
+  <p class="src">Transcribed field-for-field from <code>editorStore</code> in the production bundle, defaults included.</p>
+<pre><code>{
+  selectedObjectIds: [],
+  isolateMode: <span class="k">false</span>,  isolatedObjectIds: [],
+  tool: <span class="s">"select"</span>,
+  units: <span class="s">"ft"</span>,
+  gridSize: 500,
+  rotationSnap: 10,                 <span class="c">// degrees</span>
+  showGrid: <span class="k">true</span>,  snapToGrid: <span class="k">false</span>,  showGuides: <span class="k">false</span>,
+  shadowsEnabled: <span class="k">true</span>,  glowEnabled: <span class="k">false</span>,
+  lightingPosition: { x: 5, y: 10, z: 5 },
+  lightingPreset: <span class="s">"sunset"</span>,
+  cameraMode: <span class="s">"perspective"</span>,
+  linePlacement: { item: <span class="k">null</span>, offsetMm: 0, angleDeg: 0, baseAxis: <span class="s">"auto"</span> },
+  shapePlacement: { kind: <span class="k">null</span> }
+}</code></pre>
+  <p>
+    Isolation is modelled carefully and worth copying: <code>toggleIsolation</code>, <code>extendIsolation</code>
+    (add newly created objects to an active isolation), <code>pruneIsolation</code> (drop deleted ones, and exit
+    automatically if the set empties) and <code>clearIsolation</code>. Angle helpers normalise to 0–360°,
+    snap to the rotation increment, and format as <code>+90°</code>.
+  </p>
+
+  <h3>10.3 Camera and views</h3>
+  <table class="tight">
+    <thead><tr><th style="width:34mm">Mode</th><th>Behaviour</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Top</strong> <kbd>T</kbd></td><td>Orthographic. Correct for placement, spacing, selection box, floor-plan tracing. Some tools force a switch to it.</td></tr>
+      <tr><td><strong>Perspective</strong> <kbd>P</kbd></td><td>For height, realism, camera paths and client presentation.</td></tr>
+      <tr><td>Navigation</td><td>Orbit / pan / zoom, plus <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly movement.</td></tr>
+      <tr><td>View cube</td><td>Top-right of the canvas — a quick orientation control.</td></tr>
+      <tr><td>Axis gizmo</td><td>Bottom-right — RGB XYZ orientation indicator.</td></tr>
+      <tr><td>Camera Path</td><td>Ordered path points with per-path playback settings and animation speed; drives Export Video.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>10.4 Selection and transforms</h3>
+  <p>
+    A floating bar sits above the canvas with <strong>Move · Rotate · Scale · Delete</strong>. On selection, a
+    <strong>radial context menu</strong> appears at the object: cut, delete, pin/lock, duplicate, favourite, paste.
+  </p>
+  <table class="tight">
+    <thead><tr><th style="width:30mm">Action</th><th style="width:36mm">Shortcut</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Move</td><td><kbd>G</kbd></td><td>Translate along gizmo axes</td></tr>
+      <tr><td>Rotate</td><td><kbd>R</kbd></td><td>Snapped to 10° by default</td></tr>
+      <tr><td>Scale</td><td><kbd>E</kbd></td><td>Supported object types only</td></tr>
+      <tr><td>Toggle snap</td><td><kbd>S</kbd></td><td>Grid snapping</td></tr>
+      <tr><td>Duplicate</td><td><kbd>Shift</kbd>+drag</td><td>—</td></tr>
+      <tr><td>Delete</td><td><kbd>Del</kbd> / <kbd>Backspace</kbd></td><td>—</td></tr>
+      <tr><td>Deselect</td><td><kbd>Esc</kbd></td><td>—</td></tr>
+      <tr><td>Undo / Redo</td><td><kbd>Ctrl/Cmd+Z</kbd> · <kbd>Ctrl+Shift+Z</kbd> / <kbd>Ctrl+Y</kbd></td><td>—</td></tr>
+      <tr><td>Copy / Cut / Paste</td><td>standard</td><td>Via the radial menu too</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Objects created by Table Designer carry a <code>group_id</code> (e.g. <code>group-table-group-7</code>) so a
+    table, its linen, its chairs and every place setting move as one.
+  </p>
+
+  <h3>10.5 Scene lighting</h3>
+  <ul>
+    <li><strong>Light Position</strong> — a circular XY drag control with a numeric readout (e.g. <code>-6.8, 4.5, -1.8</code>)</li>
+    <li><strong>Height (Z)</strong> — slider</li>
+    <li><strong>Shadows</strong> and <strong>Glow</strong> checkboxes (Glow = <code>UnrealBloomPass</code>)</li>
+    <li><strong>Lighting Preset</strong> — twelve HDRI environments, shipped as 1k <code>.hdr</code> files:</li>
+  </ul>
+  <table class="tight">
+    <thead><tr><th style="width:44mm">UI label</th><th>HDRI asset</th></tr></thead>
+    <tbody>
+      <tr><td>Sunset (Venice)</td><td><code>venice_sunset_1k.hdr</code> — the default</td></tr>
+      <tr><td>Dawn</td><td><code>kiara_1_dawn_1k.hdr</code></td></tr>
+      <tr><td>Night</td><td><code>dikhololo_night_1k.hdr</code></td></tr>
+      <tr><td>Forest</td><td><code>forest_slope_1k.hdr</code></td></tr>
+      <tr><td>Lebombo</td><td><code>lebombo_1k.hdr</code></td></tr>
+      <tr><td>Mountain</td><td><code>immenstadter_horn_1k.hdr</code></td></tr>
+      <tr><td>Bridge</td><td><code>adams_place_bridge_1k.hdr</code></td></tr>
+      <tr><td>Plaza</td><td><code>potsdamer_platz_1k.hdr</code></td></tr>
+      <tr><td>Outdoor (Park)</td><td><code>rooitou_park_1k.hdr</code></td></tr>
+      <tr><td>Warehouse</td><td><code>empty_warehouse_01_1k.hdr</code></td></tr>
+      <tr><td>Indoor</td><td><code>st_fagans_interior_1k.hdr</code></td></tr>
+      <tr><td>Studio</td><td><code>studio_small_03_1k.hdr</code></td></tr>
+    </tbody>
+  </table>
+  <p class="src">These are the standard Poly Haven HDRI names — all CC0 licensed, so Nozila can use the same set legitimately.</p>
+
+  <h3>10.6 Save, autosave and history</h3>
+  <ul>
+    <li>Explicit <strong>Save</strong> plus autosave after scene updates.</li>
+    <li>Saved state preserves object transforms, textures, walls, floor plan and background references, lighting and camera.</li>
+    <li>Leaving with unsaved work prompts: “We couldn’t save your changes… leave the editor without saving your latest changes?” with a <em>Leave without saving</em> escape.</li>
+    <li>Failure copy is reassuring and specific: “Your editor is still open and your current scene remains available. No navigation has occurred.”</li>
+    <li>Undo/redo is a bounded in-memory stack — it does not survive reload.</li>
+  </ul>
+  <div class="box">
+    <span class="lab">Worth copying</span>
+    <p>
+      The save-failure handling is unusually good. It never navigates away on failure, it tells the user
+      exactly what is still safe, and it offers <em>Retry save</em>. For a tool where a lost scene is an hour of
+      work, this is the difference between an annoyance and a churn event.
+    </p>
+  </div>
+
+  <h3>10.7 Admin-only performance overlay</h3>
+  <p>
+    With admin mode active, a small overlay appears at the top-left of the canvas showing <strong>FPS</strong>,
+    <strong>Scene tris</strong> and <strong>Selected tris</strong>, labelled “Admin-only perf overlay”. Cheap to build,
+    and invaluable for diagnosing customer reports of slow scenes.
+  </p>
+</div>
+
+<!-- ============================ 11. LAYOUT TOOLS ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 11</span>
+    <h2>Layout &amp; geometry tools</h2>
+    <p class="sec-sub">Table Designer, Quick Layout, Line Placement, shapes, walls, rooms and openings.</p>
+  </div>
+
+  <h3>11.1 Table Designer</h3>
+  <p>
+    The highest-value tool in the product. It generates an entire banquet arrangement in one pass, and
+    keeps every generated clone in sync afterwards.
+  </p>
+
+  <h4>Configuration sequence</h4>
+  <ol>
+    <li><strong>Table Category</strong> and <strong>Table Shape</strong> — round · rectangular · other</li>
+    <li><strong>Choose Table</strong> — searchable picker; a segmented control switches between <em>Tables with Linens</em> and <em>Without Linens</em> catalogues</li>
+    <li><strong>Choose Linen</strong> — separate picker; per-table linen variations, with “Use the table’s default linen variation”</li>
+    <li><strong>Choose Chair</strong> and <strong>Number of Chairs</strong> — “Seat count affects every generated table set.”</li>
+    <li><strong>Place setting slots</strong> — “Apply place settings per seat”</li>
+    <li><strong>Quick Layout</strong> preset and spacing — “Enable the footer switch to configure layout presets and multi-table spacing.”</li>
+    <li><strong>Number of Tables</strong>, live <strong>Total seats</strong> readout</li>
+    <li>Live 3D preview, then <strong>Insert</strong></li>
+  </ol>
+
+  <h4>Place setting slots</h4>
+  <table class="tight">
+    <thead><tr><th style="width:34mm">Slot</th><th>Helper text observed in the product</th></tr></thead>
+    <tbody>
+      <tr><td>Plate / Platter</td><td>“Choose the primary plate used at every generated seat.”</td></tr>
+      <tr><td>Beverage (Glass)</td><td>“Choose the beverage glassware placed with each seat.”</td></tr>
+      <tr><td>Beverage, second cup</td><td>“Cup 2” / “Second glass”</td></tr>
+      <tr><td>Flatware — Fork 1</td><td rowspan="4">“Choose the utensils cloned onto each place setting.”</td></tr>
+      <tr><td>Flatware — Fork 2</td></tr>
+      <tr><td>Flatware — Knife</td></tr>
+      <tr><td>Flatware — Spoon</td></tr>
+      <tr><td>Centerpiece</td><td>“Choose the centerpiece placed at the middle of every generated table.”</td></tr>
+    </tbody>
+  </table>
+  <div class="box fact">
+    <span class="lab">The synchronisation rule — quote it into your ticket</span>
+    <p>
+      “Every configured slot is cloned onto each generated seating position and <strong>stays in sync with table,
+      chair, and Quick Layout changes</strong>.”
+    </p>
+    <p style="margin-bottom:0;">
+      That is the hard part. Changing the chair after generation must re-derive every seat position and
+      move all eight place-setting items per seat. Implement place settings as a <em>derived</em> instanced group
+      recomputed from the group’s parameters — never as loose independent objects. The bundle confirms
+      this with an <code>InstancedPlaceSettings</code> component.
+    </p>
+  </div>
+  <p>Slot management affordances: <em>Clear Slot</em>, <em>Clear Section</em>, <em>Clear All</em>, and “Back to place setting slots”. In applied mode, “Applied mode locks slot editing.”</p>
+
+  <figure>
+    <img src="img/table-wizard.jpg" alt="Table designer nested item picker">
+    <figcaption><strong>The nested picker pattern.</strong> A slot (“Select Fork 1”) opens a sub-modal over the designer with quick search, a result count (<code>2/2</code>), a card grid, and Clear / Close. The parent modal stays mounted behind it. <em>(Earlier generation, named “Table Wizard”.)</em></figcaption>
+  </figure>
+
+  <h3>11.2 Quick Layout</h3>
+  <p>
+    Takes the current selection and generates a duplicated arrangement. Available both inside Table
+    Designer and as a properties-panel action on any selection.
+  </p>
+  <table class="tight">
+    <thead><tr><th style="width:34mm">Preset</th><th>Use</th></tr></thead>
+    <tbody>
+      <tr><td>Grid</td><td>Rows × columns — the banquet default</td></tr>
+      <tr><td>Angled Grid</td><td>Rotated grid for diagonal rooms</td></tr>
+      <tr><td>Rows</td><td>Ceremony seating</td></tr>
+      <tr><td>Pyramid</td><td>Narrows toward one end</td></tr>
+      <tr><td>Diagonal</td><td>—</td></tr>
+      <tr><td>Curved</td><td>Arc facing a focal point</td></tr>
+      <tr><td>Circle / Closed Circle</td><td>Around a stage or centrepiece</td></tr>
+      <tr><td>U Shape</td><td>Conference and boardroom</td></tr>
+      <tr><td>Aisle</td><td>Splits with a centre aisle — “Items in First Row”, “Items on Wings”</td></tr>
+    </tbody>
+  </table>
+  <h5>Parameters</h5>
+  <p>
+    Number of Rows · Number of Columns · Items per Row · Space Between Rows · Space Between Columns
+    (each as feet + inches in imperial) · Gap Between Items · Angle · Sweep (degrees) · Radius ·
+    Item increment. A summary shows <strong>Total items</strong>, <strong>Selected objects</strong> and total objects, with a
+    live 3D preview.
+  </p>
+
+  <figure>
+    <img src="img/auto-layout.jpg" alt="Quick Layout modal">
+    <figcaption><strong>Quick Layout.</strong> Eight preset thumbnails as a picker grid, numeric parameters below, a running totals block, and a live 3D preview filling the right half. Cancel / Apply. <em>(Earlier generation, named “Auto Layout”.)</em></figcaption>
+  </figure>
+
+  <h3>11.3 Line Placement</h3>
+  <p>
+    For chairs, stanchions, barricades and repeated decor. Configure item, spacing offset
+    (<code>offsetMm</code>), placement angle (<code>angleDeg</code>) and base axis (<code>auto</code> | <code>X axis</code> |
+    <code>Z axis</code>), then draw the run on the canvas — best in top view. Validation messages: “Enter a valid
+    offset.”, “Enter a valid angle.”
+  </p>
+
+  <h3>11.4 Procedural shapes</h3>
+  <p>
+    Fast placeholder geometry for zones, platforms, scenic panels and measurement markers.
+    Kinds: <strong>Rectangle · Square · Circle · Triangle · Star · Box</strong>.
+  </p>
+  <p>
+    Properties: Width · Depth · Height · Diameter · Radius · <strong>Extrude Height</strong> (“Default extrude is 0,
+    which keeps the shape flat on the floor plane”) · Fill Color · Fill Opacity · Border Color ·
+    Border Opacity · Shape color. Live readouts show Area, Center, Vertices and Segments.
+  </p>
+
+  <h3>11.5 Walls and rooms</h3>
+  <figure>
+    <img src="img/walls-panel.jpg" alt="Walls panel with imported floor plan">
+    <figcaption><strong>Wall tracing over a calibrated plan.</strong> Right panel: <em>Create Wall</em> with an Idle/Drawing status chip and three icon actions (start / finish / clear), a live segment count, <em>Quick Room (center)</em> with Length, Width and Wall width inputs, then <em>Edit Wall</em> and <em>Floor Information</em>. The imported drawing sits dimmed, centred and locked on the floor plane.</figcaption>
+  </figure>
+
+  <h4>Create Wall</h4>
+  <ul>
+    <li>Click the pen icon (<em>Start creating</em>) → click points on the canvas → click the check (<em>Finish drawing</em>) or right-click to end a run.</li>
+    <li>Status chip: <em>Idle</em> / <em>Drawing…</em>; live <strong>Segments: n</strong> counter.</li>
+    <li><em>Clear all walls</em> eraser action.</li>
+    <li>Wall drawing is <strong>3D only</strong>. Shapes and camera path are disabled while wall editing is open.</li>
+  </ul>
+
+  <h4>Quick Room (center)</h4>
+  <p>
+    Enter <strong>Length</strong>, <strong>Width</strong> and <strong>Wall width (thickness)</strong> → <em>Create Room</em> generates a
+    rectangular room at the origin. Helper: “Thickness is wall width. Creates a rectangular room using
+    Length × Width.”
+  </p>
+
+  <h4>Edit Wall</h4>
+  <p>
+    Select a segment to edit <strong>Thickness</strong> and <strong>Height</strong>, apply a <strong>Wall color</strong> or
+    <strong>Wallpaper</strong> texture, or delete the segment. Scope buttons make bulk edits fast:
+    <em>Apply style to selected wall</em> / <em>Apply style to all walls</em>, and the same pair for floors.
+  </p>
+
+  <h4>Floor Information</h4>
+  <p>
+    Click a floor polygon to see Area, Center and Vertices, and apply a <strong>Floor color</strong> or
+    <strong>floor texture</strong> with <em>Tile (m)</em> sizing and a tiling toggle.
+  </p>
+  <p>
+    Wall geometry persists as a <code>wall_blueprint</code> with spans (<code>span_id</code>,
+    <code>parent_span_id</code>), segments (<code>segment_id</code>) and derived floor polygons.
+  </p>
+
+  <h3>11.6 Doors and windows as wall openings</h3>
+  <p>
+    Doors and windows are ordinary catalogue items that behave specially when dropped near a wall:
+  </p>
+  <ul>
+    <li>The opening <strong>snaps to the nearest eligible wall segment</strong> and stores a <code>wall_attachment</code>.</li>
+    <li>Editable properties: <strong>width</strong>, <strong>height</strong>, <strong>bottom offset</strong> (<code>bottom_mm</code>) and <strong>side</strong>.</li>
+    <li>Top-view markers show opening locations.</li>
+    <li>If an opening is near a wall end or taller than the wall, <strong>the editor clamps it to valid limits</strong> rather than rejecting it.</li>
+    <li>Attachment data is saved with the blueprint so openings reload correctly.</li>
+  </ul>
+
+  <h3>11.7 Materials, colours and textures</h3>
+  <h4>Per-material tinting</h4>
+  <p>
+    With exactly one catalogue model selected in 3D mode, a <strong>Colors</strong> control lists every material in
+    the GLTF and allows a tint per material. “The tint is applied per configured material and preserves
+    the original texture detail.” Actions: <em>Apply</em>, <em>Reset all</em>, <em>Cancel</em>. Hidden for unsupported
+    models, in 2D mode, and for multi-selection. Multi-colour is GLB/GLTF only. Stored as
+    <code>material_color_config</code>.
+  </p>
+
+  <h4>Texture variations</h4>
+  <p>
+    Items may ship alternate textures selectable in the properties panel (e.g. a dance floor’s
+    <em>B&amp;W Checkerboard / Black / White</em>). Uploading an item lets an admin attach variations, each
+    requiring a name, a material id and a texture file.
+  </p>
+
+  <figure>
+    <img src="img/choose-texture.jpg" alt="Choose Texture modal">
+    <figcaption><strong>Choose Texture.</strong> A simple swatch grid with names beneath, and a <em>Use Color Only</em> escape hatch that drops the texture in favour of a flat colour. The same picker serves walls, wallpaper, floors and linens, filtered by texture category.</figcaption>
+  </figure>
+</div>

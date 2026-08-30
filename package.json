@@ -1,0 +1,48 @@
+{
+  "name": "novira",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Novira \u2014 3D event planning platform (React + MySQL)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "db:start": "node scripts/db.mjs start",
+    "db:stop": "node scripts/db.mjs stop",
+    "db:status": "node scripts/db.mjs status",
+    "db:sql": "node scripts/db.mjs sql",
+    "prisma:generate": "npm run prisma:generate --workspace=apps/api",
+    "prisma:push": "npm run prisma:push --workspace=apps/api",
+    "seed": "npm run seed --workspace=apps/api",
+    "seed:demo": "npm run seed:demo --workspace=apps/api",
+    "thumbnails": "npm run thumbnails --workspace=apps/api",
+    "build:shared": "npm run build --workspace=packages/shared",
+    "predev": "npm run build --workspace=packages/shared",
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev --workspace=apps/api\" \"npm run dev --workspace=apps/web\"",
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspace=packages/shared && npm run build --workspace=apps/api && npm run build --workspace=apps/web",
+    "typecheck": "npm run typecheck --workspace=packages/shared && npm run typecheck --workspace=apps/api && npm run typecheck --workspace=apps/web",
+    "postinstall": "npm run prisma:generate --workspace=apps/api",
+    "start": "npm run prisma:push --workspace=apps/api && npm run seed --workspace=apps/api && npm run start --workspace=apps/api"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "ffmpeg-static": "^5.3.0",
+    "js-beautify": "^2.0.3",
+    "playwright": "^1.62.1"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "prisma@6.19.3": true,
+    "sharp@0.33.5": true,
+    "esbuild@0.28.2": true,
+    "ffmpeg-static@5.3.0": true,
+    "esbuild@0.25.12": true
+  }
+}

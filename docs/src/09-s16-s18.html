@@ -1,0 +1,314 @@
+<!-- ============================ 16. BILLING ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 16</span>
+    <h2>Plans, credits &amp; billing</h2>
+    <p class="sec-sub">The commercial machinery — tiers, the credit economy, Stripe, and cancellation.</p>
+  </div>
+
+  <h3>16.1 Onboarding and plan selection</h3>
+  <p>
+    New users land on a two-step onboarding before they ever reach the dashboard.
+  </p>
+  <ol>
+    <li><strong>“Tell Us About Yourself”</strong>
+      <ul>
+        <li><em>I am a…</em> — single select, required. “Choose one role to continue.”</li>
+        <li><em>I mainly design…</em> — multi select, at least one. “Select all that apply.”</li>
+      </ul>
+      Both option lists are admin-managed; the UI degrades honestly when empty (“No role options are
+      available yet. You can still skip onboarding and start from the dashboard.”).
+    </li>
+    <li><strong>“Choose your plan”</strong> — Free, Plus (badged <em>Most Popular</em>) or Pro, with live pricing and
+      credit costs pulled from the API. Paid choices redirect to Stripe Checkout.</li>
+    <li><strong>Starter workspace</strong> — “We will match a shared starter template from these onboarding answers
+      and open a ready-to-edit <em>Wellcome plan</em> for you.” <span style="color:var(--ink-3);">(The misspelling is
+      theirs, and appears in shipped plan titles.)</span></li>
+  </ol>
+  <p>
+    Draft answers are persisted under a local-storage key (<code>event-design:onboarding-checkout-draft</code>)
+    so a Stripe round-trip does not lose them. Cancelled checkout returns with a clear message and the
+    answers intact.
+  </p>
+  <div class="box">
+    <span class="lab">Super admin bypass, stated plainly in the UI</span>
+    <p style="margin-bottom:0;">
+      “This account already has full access to all models and AI tools. No plan request, subscription
+      approval, or credit gating applies to super admins.”
+    </p>
+  </div>
+
+  <h3>16.2 The credit economy</h3>
+  <p>
+    Positioned to the user as: “Credits power the AI features. You only spend them when you run one —
+    everything else is unlimited.” This is a good frame and worth borrowing: it makes metering feel like
+    fairness rather than restriction.
+  </p>
+  <table class="tight">
+    <thead><tr><th style="width:36mm">Mechanism</th><th>Behaviour</th></tr></thead>
+    <tbody>
+      <tr><td>Monthly grant</td><td>Plus 100 / Pro 200, granted at the start of each billing cycle. Admin-editable per tier; individual users can have a manual override (“Manual changes override the default plan quota and remaining credits for this user.”).</td></tr>
+      <tr><td>Credit packs</td><td>Purchasable by Plus and Pro — 50, 100, 150. Each pack is a Stripe one-time Price. “Credit packs are available on Plus and Pro plans.”</td></tr>
+      <tr><td>Expiry</td><td>Purchased credits <strong>can expire</strong> (“One month expiry”); the subscription modal shows when.</td></tr>
+      <tr><td>Consumption</td><td>Per-action, per the credit-ratio table (§3.4). Checked at run time, not at render time.</td></tr>
+      <tr><td>Refunds</td><td>On cancelled or failed jobs — explicitly labelled “Cancel generation · refund credits”.</td></tr>
+      <tr><td>Insufficient</td><td><code>INSUFFICIENT_CREDITS</code> → “Not enough credits remaining for this feature.” / “This action needs {n}…” / “More credits required”.</td></tr>
+      <tr><td>Company pool</td><td>Either per-user allocations or a single shared pool (§17).</td></tr>
+      <tr><td>Reporting</td><td>Usage by feature and by member; CSV export.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>16.3 Stripe integration</h3>
+  <table class="tight">
+    <thead><tr><th style="width:40mm">Object</th><th>Usage</th></tr></thead>
+    <tbody>
+      <tr><td>Recurring Price</td><td>One per tier for new checkouts. Editing prices in the admin console “creates new recurring Stripe Prices for new Plus and Pro checkout sessions” — existing subscribers keep their old price, and <code>historical_price_ids</code> is retained.</td></tr>
+      <tr><td>One-time Price</td><td>Per credit pack. “Credit amount and USD amount changes create a new one-time Stripe Price for future purchases.”</td></tr>
+      <tr><td>Checkout Session</td><td>For plans, credit packs, seats and member credits — four distinct return paths.</td></tr>
+      <tr><td>Customer Portal</td><td>Separate user and company portals.</td></tr>
+      <tr><td>Seat subscription</td><td>Company seats live on one company subscription: “Seat changes are charged to the company card and kept on one company subscription.”</td></tr>
+      <tr><td>Proration</td><td>Mid-cycle member upgrades show <em>Prorated amount</em>, <em>Due now</em>, <em>Final charge today</em>, and distinguish <em>Estimated locally</em> from <em>Stripe preview</em>.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Checkout return handling</h4>
+  <p>
+    On return from Stripe the app reads <code>session_id</code> and a status, then completes the session
+    server-side and invalidates caches. Notice codes observed:
+  </p>
+  <table class="tight">
+    <thead><tr><th style="width:44mm">Notice</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>subscription_success</code> / <code>subscription_cancelled</code></td><td>Plan checkout</td></tr>
+      <tr><td><code>credit_success</code> / <code>credit_cancelled</code></td><td>Credit pack purchase</td></tr>
+      <tr><td><code>seat_success</code> / <code>seat_cancelled</code></td><td>Company seat</td></tr>
+      <tr><td><code>member_credit_success</code> / <code>member_credit_cancelled</code></td><td>Credits bought for one member</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Sync failures are handled without losing the payment: “Subscription checkout could not be synced.
+    Refresh this page to retry.” The literal placeholder <code>{CHECKOUT_SESSION_ID}</code> is guarded against —
+    a nice detail that catches a common Stripe misconfiguration.
+  </p>
+
+  <h3>16.4 Manual upgrade requests</h3>
+  <p>
+    Alongside self-serve Stripe checkout there is an approval queue. A user can end up in
+    <code>PLAN_REQUEST_PENDING</code> — “Your plan change request is pending approval.” An admin approves or
+    rejects from <em>Pending Plan Requests</em>. States: <em>Requested · Awaiting User · Approved · Rejected</em>.
+    This supports invoiced enterprise deals and manual comping.
+  </p>
+
+  <h3>16.5 Cancellation</h3>
+  <ol>
+    <li>Open Subscription from the account menu.</li>
+    <li>Choose a <strong>reason</strong> from an admin-managed list — required. “Choose a reason before scheduling cancellation.”</li>
+    <li>Some reasons force a note (<code>requires_note</code>): “Tell us what would have made the plan work better.”</li>
+    <li>Cancellation is <strong>scheduled at period end</strong>, not immediate: “Your plan stays active until {date}.” A <em>Cancel scheduled switch</em> / <em>Keep plan</em> action reverses it.</li>
+    <li>Feedback lands in the admin console under Cancellation Feedback: “Review who cancelled, their required reason, and any extra feedback.”</li>
+  </ol>
+  <div class="box fact">
+    <span class="lab">Worth copying wholesale</span>
+    <p style="margin-bottom:0;">
+      A structured, admin-editable cancellation-reason taxonomy with conditional free-text, feeding a
+      reviewable feedback queue, is a churn-analysis system most products never build. It costs very
+      little and it is the only reliable way to learn why people leave.
+    </p>
+  </div>
+
+  <h3>16.6 Feature gating in practice</h3>
+  <table class="tight">
+    <thead><tr><th style="width:40mm">Situation</th><th>User-facing treatment</th></tr></thead>
+    <tbody>
+      <tr><td>Feature above tier</td><td>Visible but locked, badged “Available on Plus or Pro”; clicking opens upgrade options</td></tr>
+      <tr><td>Catalogue item above tier</td><td>Card renders in a locked style: “This catalog model is available on Plus and Pro plans.”</td></tr>
+      <tr><td>Free-plan items</td><td>Flagged <code>is_free_plan_available</code> — “Free users can place this item”</td></tr>
+      <tr><td>Insufficient credits</td><td>Blocked at run time with the exact requirement and a buy-credits path</td></tr>
+      <tr><td>Company disabled the feature</td><td>“This workflow is currently turned off for this account. A super admin can re-enable it…”</td></tr>
+      <tr><td>Free account, team action</td><td>“Free accounts can’t add team users. Upgrade to Plus or Pro to add users.”</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============================ 17. COMPANY ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 17</span>
+    <h2>Company workspaces</h2>
+    <p class="sec-sub">Seats, roles, shared credit pools and the company admin surface.</p>
+  </div>
+
+  <h3>17.1 Becoming a company</h3>
+  <p>
+    Either register with account type <strong>Company</strong> (which collects company name, address, country,
+    postal code, phone and a main email), or convert later from the account menu — <em>Convert to Company</em>,
+    “Create a company workspace and invite your team.”
+  </p>
+
+  <h3>17.2 Company profile</h3>
+  <p>
+    Name (min 2 chars), address, city (min 2), country (2-letter code), ZIP/postal (2–20 chars,
+    alphanumeric with spaces and hyphens), main email, phone (7–20 digits, with international dial-code
+    selection), and a logo — PNG/JPG/WEBP, max 10 MB. The logo is “used on PDF exports and shared
+    embeds. Images are resized to 512 px.”
+  </p>
+
+  <h3>17.3 Team and seats</h3>
+  <table class="tight">
+    <thead><tr><th style="width:34mm">Concept</th><th>Detail</th></tr></thead>
+    <tbody>
+      <tr><td>Adding members</td><td>Two paths — <strong>Direct add</strong> (“The company card is charged before Member is created”) or <strong>invitation</strong> (“The company card is charged before the invitation email is sent”).</td></tr>
+      <tr><td>Seat plan</td><td>Each seat carries its own tier. “Paid company seat with standard monthly credits” (Plus) / “…with higher monthly credits” (Pro).</td></tr>
+      <tr><td>Roles</td><td><em>Member</em> or <em>Admin</em>. “Team management is available to company Owners and Admins.”</td></tr>
+      <tr><td>Visibility</td><td><em>Own-only</em> or <em>Company-wide</em> — controls whether a member’s projects are visible to the company.</td></tr>
+      <tr><td>Statuses</td><td>Invited · Active · Pending payment · Payment failed · Cancelled</td></tr>
+      <tr><td>Mid-cycle upgrade</td><td>“Move this member from Plus to Pro for the current billing cycle,” with a proration preview.</td></tr>
+      <tr><td>Removal</td><td>“Company-owned projects created by this member transfer to the company owner.” Seat renewal is cancelled at period end.</td></tr>
+      <tr><td>Deletion</td><td>Distinct and harsher: “This deletes the user’s live account immediately.”</td></tr>
+      <tr><td>Invitations</td><td>Expire; can be cancelled, already-accepted, or blocked by incomplete seat payment. Preview shows company, seat plan, role, visibility, invited email and expiry before acceptance.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>17.4 Credit sharing — the two modes</h3>
+  <div class="grid2">
+    <div class="card">
+      <h4>Credits Per User</h4>
+      <p style="margin-bottom:0;">“Each team member receives their own credits.” Credits can be bought for one member: “The selected pack is charged to the company card and added to this member account.”</p>
+    </div>
+    <div class="card">
+      <h4>Shared Credit Pool</h4>
+      <p style="margin-bottom:0;">“All team members draw from the same pool.” Members show “Draws from company pool”. Packs go to the pool: “…added to the shared company pool.”</p>
+    </div>
+  </div>
+  <p>
+    Switching modes is deferred — <em>Set Credits Per User next cycle</em> / <em>Set Shared Credit Pool next
+    cycle</em> — with one exception: “This will apply immediately when the first member is added.”
+    Ledger reasons <code>transfer_in</code> / <code>transfer_out</code> record movement between personal balances
+    and the pool.
+  </p>
+
+  <h3>17.5 Company Dashboard</h3>
+  <p>Two distinct surfaces exist for company managers:</p>
+  <h4>Company Workspace (<code>/dashboard/company-admin</code>)</h4>
+  <ul>
+    <li><strong>Users</strong> — searchable list with status and role; select one to inspect</li>
+    <li><strong>Projects</strong> — that user’s projects, openable read-only</li>
+    <li><strong>Planners</strong> — that user’s plans, openable read-only</li>
+    <li><strong>Projects Overview</strong> — company-wide, with Created by / Last updated</li>
+  </ul>
+  <p class="src">“The dashboard only shows company data that your account is allowed to view.”</p>
+
+  <h4>Company settings sections</h4>
+  <p>Profile · Team &amp; Subscription · Credits · Billing — the last covering company expenses, usage by feature, usage by member, credit history with CSV export, and Stripe portal access. Some tenants are billed outside Stripe: “Billing for this account is managed by an administrator.”</p>
+</div>
+
+<!-- ============================ 18. ADMIN CONSOLE ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 18</span>
+    <h2>Super Admin Console</h2>
+    <p class="sec-sub">Eleven surfaces at <code>/dashboard/adminconsole</code>. This is not optional infrastructure.</p>
+  </div>
+
+  <p class="lede">
+    The console’s own subtitle enumerates its scope: <em>“Companies, model and Venue reviews, textures, users,
+    subscriptions, onboarding, reports, analytics, and theme.”</em> Because pricing, credit costs, onboarding
+    options and the palette are all server-driven, the application literally cannot be configured without
+    it. Build it in phase one.
+  </p>
+
+  <h3>18.1 Section inventory</h3>
+  <table class="tight">
+    <thead><tr><th style="width:34mm">Section</th><th>Capabilities</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>1 · Analytics</strong></td>
+        <td>Dashboard of registered users, active users (“Active users on Plus or Pro plans”), plan split, and “% of active users”. Drill into an individual user’s event stream.</td>
+      </tr>
+      <tr>
+        <td><strong>2 · Companies</strong></td>
+        <td>Create, edit and delete tenants. Per-company toggles: <em>Global Models</em>, <em>Global Textures</em>, <em>company admin can manage assets</em>. “Manage tenant access, global catalog permissions, and company-level asset controls.” View a company’s users.</td>
+      </tr>
+      <tr>
+        <td><strong>3 · Users</strong></td>
+        <td>“Search, filter, impersonate, and manage platform users.” Filter by company, role and status. Create users with a temporary password. Edit plan tier, monthly quota and current credits (“Quota and remaining credits must be non-negative whole numbers”). <strong>Login as user</strong> (impersonation), reset password, block/unblock, delete.</td>
+      </tr>
+      <tr>
+        <td><strong>4 · Model Review</strong></td>
+        <td>Approve or reject user-generated catalogue models before they become available.</td>
+      </tr>
+      <tr>
+        <td><strong>5 · Venue Review</strong></td>
+        <td>The same queue for AI-generated venues.</td>
+      </tr>
+      <tr>
+        <td><strong>6 · Textures</strong></td>
+        <td>“Upload, organize, and maintain global or company-scoped texture sets.” Category management, PBR on/off, bulk upload with per-texture descriptions.</td>
+      </tr>
+      <tr>
+        <td><strong>7 · Subscriptions</strong></td>
+        <td>The largest section — six sub-tabs, detailed below.</td>
+      </tr>
+      <tr>
+        <td><strong>8 · Onboarding</strong></td>
+        <td>Manage Section 1 (“I am a”) and Section 2 (“I mainly design”) options with display order and active flags, then the <strong>template assignment grid</strong>: “Map every onboarding answer combination to a shared starter template.” Guard: “Add at least one option to both onboarding sections to generate assignment rows.”</td>
+      </tr>
+      <tr>
+        <td><strong>9 · Reports</strong></td>
+        <td>Five operational report types — model generations, venue generations, AI Enhance, floor-plan tracing and Maps imports. Filter by status, mode, company, provider and date range; search by user, email, company, project, venue, provider, model, run id, source image or job id. Shows Total Runs and per-run Process Detail.</td>
+      </tr>
+      <tr>
+        <td><strong>10 · Theme</strong></td>
+        <td>“Choose the global Qiso palette. Users still control Dark or Light mode in Account.” Named presets, applied globally.</td>
+      </tr>
+      <tr>
+        <td><strong>11 · Company Users</strong></td>
+        <td>Cross-tenant drill-down into any user’s projects and plans.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>18.2 Subscriptions section, in detail</h3>
+  <table class="tight">
+    <thead><tr><th style="width:38mm">Sub-tab</th><th>What it controls</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Stripe Pricing</strong></td><td>The recurring monthly price for new Plus and Pro checkouts. Warning shown: creating prices affects <em>new</em> sessions only.</td></tr>
+      <tr><td><strong>Plan monthly credits</strong></td><td>“Credits granted to Plus/Pro users at the start of a new billing cycle.” “New defaults apply on the next billing cycle. Existing custom user quotas stay unchanged.”</td></tr>
+      <tr><td><strong>Credit packs</strong></td><td>Editable pack slots — credit amount, USD amount, display order, active flag.</td></tr>
+      <tr><td><strong>Credit ratios</strong></td><td>“Edit the credit costs used when users run paid AI and import features.” Note: “These values control credits deducted from user balances. Stripe billing prices remain separate.”</td></tr>
+      <tr><td><strong>Pending Plan Requests</strong></td><td>“Approve or reject manual upgrades to the Plus and Pro plans.”</td></tr>
+      <tr><td><strong>Paid Subscribers</strong></td><td>“Paid subscriber health, cancellation setup, and feedback.” Shows current plan, cycle end, credits used, scheduled cancellations.</td></tr>
+      <tr><td><strong>Cancellation Reasons</strong></td><td>“These are the required options users see before a Stripe cancellation is scheduled.” Label, <em>Require note</em>, order, active.</td></tr>
+      <tr><td><strong>Cancellation Feedback</strong></td><td>Read-only review of who cancelled and why.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>18.3 Console UI conventions</h3>
+  <p>
+    The console reuses a small, consistent component kit — worth mirroring, because it is what makes
+    eleven sections buildable at reasonable cost:
+  </p>
+  <ul>
+    <li>A collapsible left nav (“Collapse sidebar” / “Expand sidebar”) with icon-only mode</li>
+    <li><code>AdminPanel</code> — section wrapper with title, description and a right-aligned action slot</li>
+    <li>Standardised table container, head row and row classes</li>
+    <li>Four notice tones — neutral, success, warning, error</li>
+    <li>Icon action buttons in three tones — neutral, success, danger</li>
+    <li>Simple <em>Previous / Page n / Next</em> pagination</li>
+    <li>A single modal shell with a fixed <code>max-w-lg</code> and a footer button row</li>
+    <li>Empty states as dashed-border cards, and a per-panel loading string for every fetch</li>
+  </ul>
+
+  <div class="box risk">
+    <span class="lab">Security requirements for the impersonation feature</span>
+    <p>
+      “Login as user” is genuinely useful for support and genuinely dangerous. If Nozila builds it:
+    </p>
+    <ul style="margin-bottom:0;">
+      <li>Write an immutable audit record — who impersonated whom, when, and for how long.</li>
+      <li>Time-box the session and make it obvious in the UI that impersonation is active.</li>
+      <li>Block impersonation of other admins.</li>
+      <li>Consider requiring a stated reason, and notifying the impersonated user.</li>
+    </ul>
+  </div>
+</div>

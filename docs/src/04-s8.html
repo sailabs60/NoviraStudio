@@ -1,0 +1,410 @@
+<!-- ============================ 8. DOMAIN MODEL ============================ -->
+<div class="sec">
+  <div class="sec-head">
+    <span class="sec-num">SECTION 08</span>
+    <h2>Domain model &amp; MySQL schema</h2>
+    <p class="sec-sub">Entities derived from observed API paths and payload field names, expressed as MySQL 8 DDL.</p>
+  </div>
+
+  <p class="lede">
+    Every field name in this section was observed in the production bundle — as a request-body key, a query
+    parameter, a form-data field or a rendered value. Types, widths, nullability and indexes are engineering
+    judgement; the <em>names and their existence</em> are evidence.
+  </p>
+
+  <h3>8.1 Entity map</h3>
+  <div class="ascii">  company ──1:N──► user ──1:N──► project ──1:N──► plan ──1:1──► plan_scene (JSON)
+     │                │                                │
+     │                │                                ├──1:N──► plan_share
+     │                │                                ├──0:1──► plan_floor_plan
+     │                │                                ├──0:1──► plan_background
+     │                │                                ├──0:1──► plan_venue        ──► venue
+     │                │                                └──1:N──► ai_render          (AI Enhance history)
+     │                │
+     │                ├──1:N──► credit_ledger
+     │                ├──1:N──► subscription
+     │                ├──1:N──► ai_job          (all four AI job types)
+     │                ├──1:N──► template
+     │                └──1:N──► collection
+     │
+     ├──1:N──► company_member  (seat · role · visibility)
+     ├──1:N──► company_invitation
+     └──1:N──► company_setting (credit mode, asset flags)
+
+  catalog_category ──1:N──► catalog_item ──1:N──► catalog_texture_variation
+  texture_category ──1:N──► texture_asset
+  venue_generation_run ──1:N──► venue_revision_set ──► venue</div>
+
+  <h3>8.2 Units and conventions</h3>
+  <table class="tight">
+    <thead><tr><th style="width:38mm">Convention</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td>Linear dimensions</td><td><strong>Integer millimetres</strong>, suffix <code>_mm</code>. Observed: <code>width_mm</code> <code>height_mm</code> <code>depth_mm</code> <code>x_mm</code> <code>y_mm</code> <code>z_mm</code> <code>thickness_mm</code> <code>radius_mm</code> <code>diameter_mm</code> <code>length_mm</code> <code>offset_mm</code> <code>distance_mm</code> <code>deck_height_mm</code> <code>extrude_mm</code> <code>curve_depth_mm</code> <code>fold_amplitude_mm</code></td></tr>
+      <tr><td>Angles</td><td>Degrees for UI (<code>angle_deg</code>, <code>sweep_deg</code>), radians in scene maths (<code>yaw_rad</code>). Rotation snap default <strong>10°</strong>.</td></tr>
+      <tr><td>World space</td><td>Metres for camera, lighting and origin (<code>origin_m</code>, <code>tile_size_m</code>, <code>scale_world_per_px</code>)</td></tr>
+      <tr><td>Model heights</td><td>Centimetres for generated-model transforms (<code>source_height_cm</code>, <code>target_height_cm</code>) — “internally stored in cm”</td></tr>
+      <tr><td>Display units</td><td>Per-user <code>preferred_units</code>: <code>metric</code> | <code>imperial</code>. Per-plan units also stored; changing the preference does not bulk-change saved plans.</td></tr>
+      <tr><td>Money</td><td>Integer minor units — <code>unit_amount</code>, <code>seat_unit_amount</code> (Stripe convention)</td></tr>
+      <tr><td>Timestamps</td><td><code>created_at</code> <code>updated_at</code> <code>completed_at</code> <code>requested_at</code> <code>cycle_ends_at</code> <code>onboarding_completed_at</code> — UTC <code>DATETIME(3)</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>8.3 Core DDL</h3>
+
+  <h4>Identity, companies and access</h4>
+<pre><code><span class="k">CREATE TABLE</span> company (
+  id                BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  name              VARCHAR(160) <span class="k">NOT NULL</span>,
+  main_email        VARCHAR(255),
+  phone             VARCHAR(40),
+  address_line      VARCHAR(255),
+  city              VARCHAR(120),
+  country           CHAR(2),                       <span class="c">-- 2-letter code, validated client-side</span>
+  postal_code       VARCHAR(20),
+  logo_url          VARCHAR(512),                  <span class="c">-- PNG/JPG/WEBP, max 10 MB, resized to 512 px</span>
+  credit_mode       ENUM(<span class="s">'per_user'</span>,<span class="s">'shared_pool'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'per_user'</span>,
+  pending_credit_mode ENUM(<span class="s">'per_user'</span>,<span class="s">'shared_pool'</span>) <span class="k">NULL</span>,  <span class="c">-- applies next cycle</span>
+  pool_balance      INT <span class="k">NOT NULL DEFAULT</span> 0,
+  global_models_enabled            TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 1,
+  global_textures_enabled          TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 1,
+  company_admin_can_manage_assets  TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 0,
+  ai_image_to_3d_enabled           TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 1,
+  venue_generation_access_override ENUM(<span class="s">'default'</span>,<span class="s">'granted'</span>,<span class="s">'blocked'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'default'</span>,
+  stripe_customer_id VARCHAR(64),
+  is_active         TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 1,
+  created_at        DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3),
+  updated_at        DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3) <span class="k">ON UPDATE</span> CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> user (
+  id                BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  company_id        BIGINT UNSIGNED <span class="k">NULL</span>,
+  email             VARCHAR(255) <span class="k">NOT NULL UNIQUE</span>,
+  password_hash     VARCHAR(255) <span class="k">NULL</span>,          <span class="c">-- null for Google-only accounts</span>
+  google_sub        VARCHAR(64) <span class="k">NULL UNIQUE</span>,
+  first_name        VARCHAR(60) <span class="k">NOT NULL</span>,
+  last_name         VARCHAR(60) <span class="k">NOT NULL</span>,        <span class="c">-- combined max 100 chars, enforced</span>
+  display_name      VARCHAR(120),                <span class="c">-- min 2 chars</span>
+  phone             VARCHAR(40),
+  role              ENUM(<span class="s">'user'</span>,<span class="s">'company_admin'</span>,<span class="s">'super_admin'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'user'</span>,
+  plan_tier         ENUM(<span class="s">'free'</span>,<span class="s">'plus'</span>,<span class="s">'pro'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'free'</span>,
+  preferred_units   ENUM(<span class="s">'metric'</span>,<span class="s">'imperial'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'imperial'</span>,
+  appearance        ENUM(<span class="s">'dark'</span>,<span class="s">'light'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'dark'</span>,
+  is_email_verified TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 0,
+  is_blocked        TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 0,
+  marketing_opt_in  TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 0,
+  onboarding_role_id      BIGINT UNSIGNED <span class="k">NULL</span>,   <span class="c">-- "I am a"</span>
+  onboarding_design_ids   JSON <span class="k">NULL</span>,              <span class="c">-- "I mainly design" (multi-select)</span>
+  onboarding_completed_at DATETIME(3) <span class="k">NULL</span>,
+  credits_remaining       INT <span class="k">NOT NULL DEFAULT</span> 0,  <span class="c">-- CACHE of credit_ledger; never authoritative</span>
+  monthly_credit_quota    INT <span class="k">NOT NULL DEFAULT</span> 0,  <span class="c">-- may be manually overridden by admin</span>
+  created_at        DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3),
+  updated_at        DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3) <span class="k">ON UPDATE</span> CURRENT_TIMESTAMP(3),
+  <span class="k">KEY</span> ix_user_company (company_id),
+  <span class="k">KEY</span> ix_user_plan (plan_tier, is_blocked),
+  <span class="k">CONSTRAINT</span> fk_user_company <span class="k">FOREIGN KEY</span> (company_id) <span class="k">REFERENCES</span> company(id) <span class="k">ON DELETE SET NULL</span>
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> company_member (
+  id            BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  company_id    BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  user_id       BIGINT UNSIGNED <span class="k">NULL</span>,          <span class="c">-- null while invitation pending</span>
+  invited_email VARCHAR(255) <span class="k">NOT NULL</span>,
+  role          ENUM(<span class="s">'member'</span>,<span class="s">'admin'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'member'</span>,
+  visibility    ENUM(<span class="s">'own_only'</span>,<span class="s">'company_wide'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'own_only'</span>,
+  seat_plan_tier ENUM(<span class="s">'free'</span>,<span class="s">'plus'</span>,<span class="s">'pro'</span>) <span class="k">NOT NULL</span>,
+  status        ENUM(<span class="s">'invited'</span>,<span class="s">'active'</span>,<span class="s">'pending_payment'</span>,<span class="s">'payment_failed'</span>,<span class="s">'cancelled'</span>) <span class="k">NOT NULL</span>,
+  invitation_token   CHAR(43) <span class="k">NULL UNIQUE</span>,
+  invitation_expires_at DATETIME(3) <span class="k">NULL</span>,
+  stripe_subscription_item_id VARCHAR(64),
+  created_at    DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3),
+  <span class="k">UNIQUE KEY</span> uq_member (company_id, invited_email),
+  <span class="k">KEY</span> ix_member_user (user_id)
+) ENGINE=InnoDB;</code></pre>
+
+  <h4>Projects, plans and the scene document</h4>
+<pre><code><span class="k">CREATE TABLE</span> project (
+  id          BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  owner_id    BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  company_id  BIGINT UNSIGNED <span class="k">NULL</span>,
+  title       VARCHAR(180) <span class="k">NOT NULL</span>,
+  description TEXT <span class="k">NULL</span>,
+  created_at  DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3),
+  updated_at  DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3) <span class="k">ON UPDATE</span> CURRENT_TIMESTAMP(3),
+  <span class="k">KEY</span> ix_project_owner (owner_id, updated_at <span class="k">DESC</span>)
+) ENGINE=InnoDB;
+<span class="c">-- Deletion rule observed in UI: a project with plans cannot be deleted ("Delete all plans first").</span>
+
+<span class="k">CREATE TABLE</span> plan (
+  id            BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  project_id    BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  owner_id      BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  title         VARCHAR(180) <span class="k">NOT NULL</span>,
+  editor_type   ENUM(<span class="s">'3d'</span>,<span class="s">'2d'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'3d'</span>,   <span class="c">-- UI label: "Sketch Type"</span>
+  units         ENUM(<span class="s">'metric'</span>,<span class="s">'imperial'</span>) <span class="k">NOT NULL</span>,          <span class="c">-- copied from user pref at creation</span>
+  start_in_top_view TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 0,
+  preview_url   VARCHAR(512) <span class="k">NULL</span>,                         <span class="c">-- dashboard thumbnail</span>
+  is_read_only  TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 0,
+  object_count  INT <span class="k">NOT NULL DEFAULT</span> 0,
+  created_at    DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3),
+  updated_at    DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3) <span class="k">ON UPDATE</span> CURRENT_TIMESTAMP(3),
+  <span class="k">KEY</span> ix_plan_project (project_id, updated_at <span class="k">DESC</span>),
+  <span class="k">CONSTRAINT</span> fk_plan_project <span class="k">FOREIGN KEY</span> (project_id) <span class="k">REFERENCES</span> project(id) <span class="k">ON DELETE CASCADE</span>
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> plan_scene (
+  plan_id        BIGINT UNSIGNED <span class="k">PRIMARY KEY</span>,
+  schema_version SMALLINT UNSIGNED <span class="k">NOT NULL DEFAULT</span> 1,
+  scene          JSON <span class="k">NOT NULL</span>,     <span class="c">-- objects, groups, transforms, materials</span>
+  wall_blueprint JSON <span class="k">NULL</span>,        <span class="c">-- spans, segments, openings, floor polygons</span>
+  lighting       JSON <span class="k">NULL</span>,        <span class="c">-- preset, position, height, shadows, glow</span>
+  camera         JSON <span class="k">NULL</span>,        <span class="c">-- mode, position, target, saved camera path</span>
+  updated_at     DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3) <span class="k">ON UPDATE</span> CURRENT_TIMESTAMP(3),
+  <span class="k">CONSTRAINT</span> fk_scene_plan <span class="k">FOREIGN KEY</span> (plan_id) <span class="k">REFERENCES</span> plan(id) <span class="k">ON DELETE CASCADE</span>
+) ENGINE=InnoDB;</code></pre>
+
+  <div class="box">
+    <span class="lab">Scene object shape</span>
+    <p>Each entry in <code>scene.objects[]</code> carries, at minimum, the fields observed in the editor’s properties panel and store:</p>
+<pre style="margin:6px 0 0;"><code>{
+  <span class="n">"id"</span>: <span class="s">"uuid"</span>,
+  <span class="n">"type"</span>: <span class="s">"catalog | shape | wall | floor | curtain | tent | biljax-stage | text | opening"</span>,
+  <span class="n">"catalog_item_id"</span>: 1042,
+  <span class="n">"group_id"</span>: <span class="s">"group-table-group-7"</span>,        <span class="c">// Table Designer keeps sets together</span>
+  <span class="n">"position_mm"</span>: { <span class="n">"x"</span>: 0, <span class="n">"y"</span>: 0, <span class="n">"z"</span>: 0 },
+  <span class="n">"rotation_deg"</span>: { <span class="n">"x"</span>: 0, <span class="n">"y"</span>: 90, <span class="n">"z"</span>: 0 },
+  <span class="n">"scale"</span>: { <span class="n">"x"</span>: 1, <span class="n">"y"</span>: 1, <span class="n">"z"</span>: 1 },
+  <span class="n">"dimensions_mm"</span>: { <span class="n">"width"</span>: 1524, <span class="n">"depth"</span>: 1524, <span class="n">"height"</span>: 768 },
+  <span class="n">"locked"</span>: <span class="k">false</span>,
+  <span class="n">"opacity"</span>: 1.0,
+  <span class="n">"material_color_config"</span>: { <span class="n">"&lt;material_id&gt;"</span>: <span class="s">"#c9b08a"</span> },
+  <span class="n">"texture_variation_id"</span>: 88,
+  <span class="n">"texture_tiling_enabled"</span>: <span class="k">true</span>,
+  <span class="n">"texture_tile_size_m"</span>: 0.5,
+  <span class="n">"params"</span>: { <span class="c">/* type-specific: curtain, stage, tent, shape — see §12 */</span> }
+}</code></pre>
+  </div>
+
+  <h4>Catalogue and textures</h4>
+<pre><code><span class="k">CREATE TABLE</span> catalog_category (
+  id         BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  name       VARCHAR(120) <span class="k">NOT NULL</span>,
+  slug       VARCHAR(140) <span class="k">NOT NULL UNIQUE</span>,
+  sort_order INT <span class="k">NOT NULL DEFAULT</span> 0
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> catalog_item (
+  id            BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  category_id   BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  company_id    BIGINT UNSIGNED <span class="k">NULL</span>,     <span class="c">-- null = global library</span>
+  owner_id      BIGINT UNSIGNED <span class="k">NULL</span>,     <span class="c">-- set for personal "My catalog" items</span>
+  scope         ENUM(<span class="s">'global'</span>,<span class="s">'company'</span>,<span class="s">'personal'</span>) <span class="k">NOT NULL</span>,
+  name          VARCHAR(180) <span class="k">NOT NULL</span>,
+  description   TEXT,
+  model_url     VARCHAR(512) <span class="k">NOT NULL</span>,   <span class="c">-- GLB/GLTF/OBJ/FBX, max 50 MB on upload</span>
+  preview_image VARCHAR(512),               <span class="c">-- JPG/PNG/WebP, max 5 MB</span>
+  icon_url      VARCHAR(512),
+  width_mm      INT, depth_mm INT, height_mm INT, diameter_mm INT,
+  table_shape   ENUM(<span class="s">'round'</span>,<span class="s">'rectangular'</span>,<span class="s">'other'</span>) <span class="k">NULL</span>,
+  seats_default SMALLINT <span class="k">NULL</span>,
+  is_free_plan_available TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 0,   <span class="c">-- "Free users can place this item"</span>
+  default_material_id VARCHAR(120) <span class="k">NULL</span>,
+  material_color_config JSON <span class="k">NULL</span>,
+  variations_manifest   JSON <span class="k">NULL</span>,
+  texture_variation_count SMALLINT <span class="k">NOT NULL DEFAULT</span> 0,
+  is_active     TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 1,
+  review_status ENUM(<span class="s">'pending'</span>,<span class="s">'approved'</span>,<span class="s">'rejected'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'approved'</span>,
+  created_at    DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3),
+  <span class="k">KEY</span> ix_item_cat (category_id, is_active),
+  <span class="k">KEY</span> ix_item_scope (scope, company_id),
+  <span class="k">FULLTEXT KEY</span> ft_item (name, description)
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> catalog_texture_variation (
+  id              BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  catalog_item_id BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  name            VARCHAR(140) <span class="k">NOT NULL</span>,   <span class="c">-- every variation must be named</span>
+  material_id     VARCHAR(120) <span class="k">NOT NULL</span>,
+  texture_url     VARCHAR(512) <span class="k">NOT NULL</span>,
+  is_default      TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 0,
+  <span class="k">KEY</span> ix_var_item (catalog_item_id)
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> texture_asset (
+  id           BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  category_id  BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  company_id   BIGINT UNSIGNED <span class="k">NULL</span>,       <span class="c">-- null = global library</span>
+  name         VARCHAR(160) <span class="k">NOT NULL</span>,
+  description  VARCHAR(400) <span class="k">NOT NULL</span>,      <span class="c">-- "Each texture needs a description"</span>
+  image_url    VARCHAR(512) <span class="k">NOT NULL</span>,      <span class="c">-- PNG/JPEG/WebP</span>
+  pbr_enabled  TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 0,
+  tile_size_m  DECIMAL(6,3) <span class="k">NULL</span>,
+  <span class="k">KEY</span> ix_tex_cat (category_id, company_id)
+) ENGINE=InnoDB;</code></pre>
+
+  <h4>Credits, subscriptions and the AI job queue</h4>
+<pre><code><span class="k">CREATE TABLE</span> credit_ledger (
+  id          BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  user_id     BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  company_id  BIGINT UNSIGNED <span class="k">NULL</span>,          <span class="c">-- set when drawn from / added to the pool</span>
+  delta       INT <span class="k">NOT NULL</span>,                    <span class="c">-- +grant/+purchase/+refund, -debit</span>
+  reason      ENUM(<span class="s">'cycle_grant'</span>,<span class="s">'purchase'</span>,<span class="s">'debit'</span>,<span class="s">'refund'</span>,
+                   <span class="s">'transfer_in'</span>,<span class="s">'transfer_out'</span>,<span class="s">'admin_adjustment'</span>) <span class="k">NOT NULL</span>,
+  feature_code VARCHAR(48) <span class="k">NULL</span>,              <span class="c">-- ai_image_to_3d | ai_enhance | ... </span>
+  ai_job_id   BIGINT UNSIGNED <span class="k">NULL</span>,
+  expires_at  DATETIME(3) <span class="k">NULL</span>,               <span class="c">-- purchased packs can expire ("One month expiry")</span>
+  balance_after INT <span class="k">NOT NULL</span>,
+  created_at  DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3),
+  <span class="k">KEY</span> ix_ledger_user (user_id, created_at <span class="k">DESC</span>),
+  <span class="k">KEY</span> ix_ledger_feature (feature_code, created_at)
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> credit_ratio (             <span class="c">-- admin-editable cost per action</span>
+  feature_code VARCHAR(48) <span class="k">PRIMARY KEY</span>,
+  label        VARCHAR(120) <span class="k">NOT NULL</span>,
+  description  VARCHAR(400),
+  credits      INT <span class="k">NOT NULL</span>,
+  is_active    TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 1
+) ENGINE=InnoDB;
+<span class="c">-- Seed: ai_image_to_3d=10, floor_plan_ai_draw=3, ai_enhance=2, google_maps=1,</span>
+<span class="c">--       ai_enhance_nano_banana_2, ai_enhance_qwen, venue_generation</span>
+
+<span class="k">CREATE TABLE</span> credit_pack (              <span class="c">-- admin-editable purchasable packs</span>
+  id             BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  credit_amount  INT <span class="k">NOT NULL</span>,               <span class="c">-- e.g. 50 / 100 / 150</span>
+  unit_amount    INT <span class="k">NOT NULL</span>,               <span class="c">-- USD cents</span>
+  stripe_price_id VARCHAR(64) <span class="k">NOT NULL</span>,
+  historical_price_ids JSON <span class="k">NULL</span>,
+  expiry_days    INT <span class="k">NULL</span>,
+  is_active      TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 1,
+  display_order  INT <span class="k">NOT NULL DEFAULT</span> 0
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> subscription (
+  id            BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  user_id       BIGINT UNSIGNED <span class="k">NULL</span>,
+  company_id    BIGINT UNSIGNED <span class="k">NULL</span>,
+  plan_tier     ENUM(<span class="s">'free'</span>,<span class="s">'plus'</span>,<span class="s">'pro'</span>) <span class="k">NOT NULL</span>,
+  billing_source ENUM(<span class="s">'stripe'</span>,<span class="s">'manual'</span>,<span class="s">'company'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'stripe'</span>,
+  stripe_subscription_id     VARCHAR(64),
+  stripe_subscription_status VARCHAR(32),
+  billing_cycle_anchor DATETIME(3),
+  cycle_ends_at        DATETIME(3),
+  monthly_credit_quota INT <span class="k">NOT NULL DEFAULT</span> 0,
+  cancel_at_period_end TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 0,
+  cancellation_reason_id BIGINT UNSIGNED <span class="k">NULL</span>,
+  cancellation_note    TEXT <span class="k">NULL</span>,
+  created_at    DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> ai_job (                    <span class="c">-- ONE table for all four AI features</span>
+  id            BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  public_id     CHAR(36) <span class="k">NOT NULL UNIQUE</span>,     <span class="c">-- job_id / run_id exposed to client</span>
+  user_id       BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  company_id    BIGINT UNSIGNED <span class="k">NULL</span>,
+  plan_id       BIGINT UNSIGNED <span class="k">NULL</span>,
+  project_id    BIGINT UNSIGNED <span class="k">NULL</span>,
+  process_type  ENUM(<span class="s">'ai_image_to_3d'</span>,<span class="s">'ai_enhance'</span>,<span class="s">'floor_plan_ai_draw'</span>,
+                     <span class="s">'venue_generation'</span>,<span class="s">'google_maps'</span>) <span class="k">NOT NULL</span>,
+  provider      VARCHAR(64),                    <span class="c">-- world_labs | planner_ai | ...</span>
+  provider_model VARCHAR(64),                   <span class="c">-- marble-1.0-draft | nano_banana_2 | qwen</span>
+  status        ENUM(<span class="s">'queued'</span>,<span class="s">'in_progress'</span>,<span class="s">'completed'</span>,<span class="s">'failed'</span>,<span class="s">'cancelled'</span>) <span class="k">NOT NULL</span>,
+  progress      TINYINT UNSIGNED <span class="k">NOT NULL DEFAULT</span> 0,
+  idempotency_key VARCHAR(80) <span class="k">NOT NULL</span>,
+  credits_charged INT <span class="k">NOT NULL DEFAULT</span> 0,
+  input_payload  JSON,                          <span class="c">-- prompt, preset_ids, input_mode, source refs</span>
+  output_payload JSON,                          <span class="c">-- artefact urls, mesh meta, wall segments</span>
+  source_image_filename VARCHAR(255),
+  error_code    VARCHAR(64),
+  error_message TEXT,
+  trace_id      CHAR(32),
+  created_at    DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3),
+  completed_at  DATETIME(3) <span class="k">NULL</span>,
+  <span class="k">UNIQUE KEY</span> uq_idem (user_id, idempotency_key),
+  <span class="k">KEY</span> ix_job_type (process_type, status, created_at <span class="k">DESC</span>),
+  <span class="k">KEY</span> ix_job_user (user_id, created_at <span class="k">DESC</span>)
+) ENGINE=InnoDB;</code></pre>
+
+  <h4>Sharing, templates, collections and venues</h4>
+<pre><code><span class="k">CREATE TABLE</span> plan_share (
+  id         BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  plan_id    BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  token      CHAR(43) <span class="k">NOT NULL UNIQUE</span>,   <span class="c">-- opaque, NOT the plan id</span>
+  mode       ENUM(<span class="s">'view'</span>,<span class="s">'embed'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'view'</span>,
+  expires_at DATETIME(3) <span class="k">NULL</span>,
+  revoked_at DATETIME(3) <span class="k">NULL</span>,
+  created_at DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> template (
+  id          BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  owner_id    BIGINT UNSIGNED <span class="k">NULL</span>,
+  scope       ENUM(<span class="s">'local'</span>,<span class="s">'global'</span>) <span class="k">NOT NULL DEFAULT</span> <span class="s">'local'</span>,
+  title       VARCHAR(180) <span class="k">NOT NULL</span>,   <span class="c">-- min 3 chars; unique per scope</span>
+  description TEXT,
+  snapshot    JSON <span class="k">NOT NULL</span>,           <span class="c">-- full plan scene snapshot</span>
+  preview_url VARCHAR(512),
+  created_at  DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3),
+  <span class="k">UNIQUE KEY</span> uq_tpl (scope, owner_id, title)   <span class="c">-- error TEMPLATE_TITLE_EXISTS</span>
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> collection (
+  id            BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  owner_id      BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  name          VARCHAR(180) <span class="k">NOT NULL</span>,
+  objects       JSON <span class="k">NOT NULL</span>,         <span class="c">-- relative placement preserved</span>
+  object_count  INT <span class="k">NOT NULL</span>,
+  preview_url   VARCHAR(512),               <span class="c">-- captured from the 3D canvas</span>
+  source_plan_id BIGINT UNSIGNED <span class="k">NULL</span>,
+  created_at    DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> venue (                   <span class="c">-- reusable AI-generated environment</span>
+  id          BIGINT UNSIGNED <span class="k">PRIMARY KEY</span> AUTO_INCREMENT,
+  owner_id    BIGINT UNSIGNED <span class="k">NULL</span>,
+  company_id  BIGINT UNSIGNED <span class="k">NULL</span>,
+  scope       ENUM(<span class="s">'public'</span>,<span class="s">'company'</span>,<span class="s">'personal'</span>) <span class="k">NOT NULL</span>,
+  name        VARCHAR(180) <span class="k">NOT NULL</span>,   <span class="c">-- default "Untitled venue"</span>
+  splat_url   VARCHAR(512) <span class="k">NOT NULL</span>,   <span class="c">-- SPZ Gaussian splat</span>
+  preview_url VARCHAR(512),
+  scale_profile_id BIGINT UNSIGNED <span class="k">NULL</span>,
+  source_run_id BIGINT UNSIGNED <span class="k">NULL</span>,
+  created_at  DATETIME(3) <span class="k">NOT NULL DEFAULT</span> CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB;
+
+<span class="k">CREATE TABLE</span> plan_venue (              <span class="c">-- attachment + per-plan transform</span>
+  plan_id   BIGINT UNSIGNED <span class="k">PRIMARY KEY</span>,
+  venue_id  BIGINT UNSIGNED <span class="k">NOT NULL</span>,
+  transform JSON <span class="k">NOT NULL</span>,           <span class="c">-- position, rotation, scale</span>
+  is_locked TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 1,
+  is_hidden TINYINT(1) <span class="k">NOT NULL DEFAULT</span> 0
+) ENGINE=InnoDB;</code></pre>
+
+  <h3>8.4 Supporting tables</h3>
+  <table class="tight">
+    <thead><tr><th style="width:52mm">Table</th><th>Purpose and key columns</th></tr></thead>
+    <tbody>
+      <tr><td><code>plan_floor_plan</code></td><td>Calibrated drawing: <code>image_url</code>, <code>file_key</code>, <code>scale_world_per_px</code>, <code>real_distance</code>, <code>point_a</code>/<code>point_b</code>, <code>origin_m</code>, locked flag</td></tr>
+      <tr><td><code>plan_background</code></td><td>Un-scaled backdrop image: <code>image_url</code>, <code>file_key</code>. One per plan; replacing deletes the old file.</td></tr>
+      <tr><td><code>ai_render</code></td><td>AI Enhance history per plan: <code>job_id</code>, <code>prompt</code>, <code>model</code>, <code>preview_url</code>, <code>media_url</code>, <code>created_at</code></td></tr>
+      <tr><td><code>onboarding_option</code></td><td><code>section</code> (1|2), <code>label</code>, <code>sort_order</code>, <code>is_active</code> — the “I am a” / “I mainly design” choices</td></tr>
+      <tr><td><code>onboarding_template_assignment</code></td><td><code>section_1_option_id</code> × <code>section_2_signature</code> → <code>template_id</code>; the grid that picks a starter workspace</td></tr>
+      <tr><td><code>cancellation_reason</code></td><td><code>label</code>, <code>requires_note</code>, <code>sort_order</code>, <code>is_active</code></td></tr>
+      <tr><td><code>subscription_request</code></td><td>Manual upgrade queue: <code>user_id</code>, <code>requested_plan</code>, <code>status</code>, <code>requested_at</code>, <code>decided_by</code></td></tr>
+      <tr><td><code>theme_preset</code></td><td><code>name</code>, <code>tokens</code> JSON, <code>is_active</code> — e.g. “DesignCode Light”, “Qiso Blueprint”</td></tr>
+      <tr><td><code>upload</code></td><td><code>file_key</code>, <code>owner_id</code>, <code>content_type</code>, <code>size</code>, <code>purpose</code>. Deleted explicitly via <code>DELETE /uploads/{file_key}</code>.</td></tr>
+      <tr><td><code>analytics_event</code></td><td><code>anonymous_id</code>, <code>user_id</code>, <code>name</code>, <code>props</code> JSON — see Appendix B for the observed event vocabulary</td></tr>
+      <tr><td><code>guest_session</code></td><td><code>session_id</code>, <code>name</code>, <code>email</code>, <code>background_image</code>, <code>camera</code> JSON (extracted perspective). Expires; cleaned up periodically.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="box warn">
+    <span class="lab">Storage sizing note</span>
+    <p>
+      Venue splats are the dominant storage cost — the subject ships a 5 MB renderer, and SPZ assets
+      themselves typically run tens of megabytes. Keep every binary artefact (GLB, textures, renders,
+      exports, splats) in object storage and hold only URLs and keys in MySQL. Never put binaries in
+      the database.
+    </p>
+  </div>
+</div>
