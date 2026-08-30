@@ -187,6 +187,16 @@ interface EditorState {
   markCameraTouched: () => void;
   requestFrameAll: () => void;
 
+  /**
+   * Held-right-click fly navigation is active.
+   *
+   * While true, the keyboard map's single-letter shortcuts stand down — 's'
+   * moving the camera backward must not also toggle snap — and WASD/QE are
+   * read directly by the viewport instead.
+   */
+  flying: boolean;
+  setFlying: (flying: boolean) => void;
+
   /* ── Saved views ──────────────────────────────────────────────────────
    * Named camera positions the designer keeps so a client can navigate the
    * scene without knowing how to orbit one. The request counter is how the
@@ -457,6 +467,9 @@ export const useEditor = create<EditorState>((set, get) => ({
   markCameraTouched: () => {
     if (!get().cameraTouched) set({ cameraTouched: true });
   },
+
+  flying: false,
+  setFlying: (flying) => set({ flying }),
 
   viewRequest: null,
   goToView: (view) => set({ viewRequest: { view, at: Date.now() } }),

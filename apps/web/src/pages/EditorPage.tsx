@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import * as THREE from 'three';
+import type { Vec3 } from '@novira/shared';
 import { LogoMark } from '../components/Logo';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -17,7 +19,7 @@ import {
 import { api, ApiClientError } from '../lib/api';
 import { useEditor, type WorkPanel } from '../editor/editorStore';
 import { capturePreview } from '../editor/capture';
-import { Viewport } from '../editor/Viewport';
+import { Viewport, currentCamera } from '../editor/Viewport';
 import { PropertiesDock } from '../editor/PropertiesDock';
 import { WallPanel } from '../editor/WallPanel';
 import { DraftPanel } from '../editor/DraftPanel';
@@ -531,6 +533,29 @@ function StudioTopBar({
 /* ── Keyboard ──────────────────────────────────────────────────────────── */
 
 /**
+ * Numpad view snaps, in the direction the camera moves to *from* the current
+ * target — Blender's convention, so anyone who already knows a 3D tool gets
+ * this for free. The Ctrl-held pairs are the opposite face.
+ */
+const NUMPAD_VIEW_AXES: Record<string, THREE.Vector3> = {
+  Numpad7: new THREE.Vector3(0, 1, 0.001),
+  Numpad1: new THREE.Vector3(0, 0, 1),
+  Numpad3: new THREE.Vector3(1, 0, 0),
+};
+const NUMPAD_VIEW_AXES_ALT: Record<string, THREE.Vector3> = {
+  Numpad7: new THREE.Vector3(0, -1, 0.001),
+  Numpad1: new THREE.Vector3(0, 0, -1),
+  Numpad3: new THREE.Vector3(-1, 0, 0),
+};
+const NUMPAD_ORBIT_STEP = THREE.MathUtils.degToRad(15);
+const NUMPAD_POLAR_LIMIT = 0.05;
+
+/** A transient fly-to — never saved to the views list, just a flight target. */
+function flyTo(store: ReturnType<typeof useEditor.getState>, positionMm: Vec3, targetMm: Vec3, fov: number) {
+  store.goToView({ id: 'numpad', name: 'Numpad view', positionMm, targetMm, fov, createdAt: new Date().toISOString() });
+}
+
+/**
  * The editor keyboard map.
  *
  * Number keys move between the rail's sections, which is the one shortcut worth
@@ -551,6 +576,9 @@ function useKeyboardShortcuts(
       if (target?.isContentEditable) return;
 
       const s = useEditor.getState();
+      // Right-click fly navigation owns the keyboard while it is held — 's'
+      // moving the camera backward must not also toggle snap.
+      if (s.flying) return;
       const mod = e.ctrlKey || e.metaKey;
 
       if (mod && e.key.toLowerCase() === 's') {
@@ -584,6 +612,67 @@ function useKeyboardShortcuts(
         panels.setRightOpen((v) => !v);
         return;
       }
+
+      // Numpad view navigation — orbit, snap and dolly, all relative to the
+      // camera's own current target rather than a fixed scene position, so it
+      // reads as "look this way from here" no matter where the view already is.
+      if (e.code in NUMPAD_VIEW_AXES) {
+        const cam = currentCamera();
+        if (cam) {
+          e.preventDefault();
+          const dir = (mod ? NUMPAD_VIEW_AXES_ALT : NUMPAD_VIEW_AXES)[e.code]!.clone().normalize();
+          const target = new THREE.Vector3(cam.targetMm.x, cam.targetMm.y, cam.targetMm.z);
+          const distanceMm =
+            new THREE.Vector3(cam.positionMm.x, cam.positionMm.y, cam.positionMm.z).distanceTo(target) || 8000;
+          const position = target.clone().addScaledVector(dir, distanceMm);
+          flyTo(s, { x: position.x, y: position.y, z: position.z }, cam.targetMm, cam.fov);
+        }
+        return;
+      }
+      if (e.code === 'Numpad5') {
+        e.preventDefault();
+        s.setCameraMode(s.cameraMode === 'top' ? 'perspective' : 'top');
+        return;
+      }
+      if (e.code === 'Numpad0') {
+        e.preventDefault();
+        s.requestFrameAll();
+        return;
+      }
+      if (['Numpad4', 'Numpad6', 'Numpad8', 'Numpad2'].includes(e.code)) {
+        const cam = currentCamera();
+        if (cam) {
+          e.preventDefault();
+          const target = new THREE.Vector3(cam.targetMm.x, cam.targetMm.y, cam.targetMm.z);
+          const offset = new THREE.Vector3(cam.positionMm.x, cam.positionMm.y, cam.positionMm.z).sub(target);
+          const spherical = new THREE.Spherical().setFromVector3(offset);
+          if (e.code === 'Numpad4') spherical.theta += NUMPAD_ORBIT_STEP;
+          if (e.code === 'Numpad6') spherical.theta -= NUMPAD_ORBIT_STEP;
+          if (e.code === 'Numpad8') {
+            spherical.phi = THREE.MathUtils.clamp(spherical.phi - NUMPAD_ORBIT_STEP, NUMPAD_POLAR_LIMIT, Math.PI - NUMPAD_POLAR_LIMIT);
+          }
+          if (e.code === 'Numpad2') {
+            spherical.phi = THREE.MathUtils.clamp(spherical.phi + NUMPAD_ORBIT_STEP, NUMPAD_POLAR_LIMIT, Math.PI - NUMPAD_POLAR_LIMIT);
+          }
+          offset.setFromSpherical(spherical);
+          const position = target.clone().add(offset);
+          flyTo(s, { x: position.x, y: position.y, z: position.z }, cam.targetMm, cam.fov);
+        }
+        return;
+      }
+      if (e.code === 'NumpadAdd' || e.code === 'NumpadSubtract') {
+        const cam = currentCamera();
+        if (cam) {
+          e.preventDefault();
+          const target = new THREE.Vector3(cam.targetMm.x, cam.targetMm.y, cam.targetMm.z);
+          const offset = new THREE.Vector3(cam.positionMm.x, cam.positionMm.y, cam.positionMm.z).sub(target);
+          offset.multiplyScalar(e.code === 'NumpadAdd' ? 0.85 : 1 / 0.85);
+          const position = target.clone().add(offset);
+          flyTo(s, { x: position.x, y: position.y, z: position.z }, cam.targetMm, cam.fov);
+        }
+        return;
+      }
+
       if (mod) return;
 
       // Rail sections on the number row.

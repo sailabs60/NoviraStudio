@@ -1192,6 +1192,136 @@ function CameraRig({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
   return null;
 }
 
+const FLY_MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE']);
+const FLY_LOOK_SPEED = 0.0025;
+const FLY_SPEED = 6;
+const FLY_BOOST = 2.4;
+
+/**
+ * Hold-right-click free-fly navigation, the way Enscape, Twinmotion and Unreal
+ * do it — the convention anyone who has ever looked around a rendered building
+ * already knows.
+ *
+ * OrbitControls owns the camera the rest of the time, so the trick is not
+ * fighting it: drei's wrapper only calls `controls.update()` — the thing that
+ * would otherwise snap the camera straight back — while `controls.enabled` is
+ * true, so disabling it for the duration of the hold is sufficient to drive
+ * the camera directly. The pointerdown listener is registered in the capture
+ * phase so it always disables the controls before their own native listener
+ * on the same element can start a pan.
+ */
+function FlyNavigation({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
+  const { camera, gl } = useThree();
+  const setFlying = useEditor((s) => s.setFlying);
+  const pressed = useRef<Set<string>>(new Set());
+  const active = useRef(false);
+  const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
+
+  useEffect(() => {
+    const dom = gl.domElement;
+
+    const endFly = (pointerId?: number) => {
+      if (!active.current) return;
+      active.current = false;
+      pressed.current.clear();
+      setFlying(false);
+      const controls = orbitRef.current;
+      if (controls) {
+        // Put the orbit target back out in front of wherever flying left the
+        // camera, rather than leaving it wherever it last orbited around —
+        // otherwise the next plain drag orbits around a stale, distant point.
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        controls.target.copy(camera.position).addScaledVector(forward, 6);
+        controls.enabled = true;
+        controls.update();
+      }
+      if (pointerId != null) {
+        try {
+          dom.releasePointerCapture(pointerId);
+        } catch {
+          /* already released */
+        }
+      }
+      invalidate();
+    };
+
+    const onContextMenu = (e: MouseEvent) => e.preventDefault();
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 2) return;
+      e.preventDefault();
+      active.current = true;
+      setFlying(true);
+      useEditor.getState().markCameraTouched();
+      const controls = orbitRef.current;
+      if (controls) controls.enabled = false;
+      euler.current.setFromQuaternion(camera.quaternion);
+      dom.setPointerCapture(e.pointerId);
+      invalidate();
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.button === 2) endFly(e.pointerId);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!active.current) return;
+      euler.current.y -= (e.movementX ?? 0) * FLY_LOOK_SPEED;
+      euler.current.x -= (e.movementY ?? 0) * FLY_LOOK_SPEED;
+      euler.current.x = THREE.MathUtils.clamp(euler.current.x, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
+      camera.quaternion.setFromEuler(euler.current);
+      invalidate();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!active.current) return;
+      if (FLY_MOVE_KEYS.has(e.code) || e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        e.preventDefault();
+        pressed.current.add(e.code);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => pressed.current.delete(e.code);
+    const onBlur = () => endFly();
+
+    // Capture phase: guarantees `controls.enabled = false` lands before
+    // OrbitControls' own bubble-phase listener on the same element sees the
+    // same right-click and starts its default pan.
+    dom.addEventListener('pointerdown', onPointerDown, { capture: true });
+    dom.addEventListener('contextmenu', onContextMenu);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      dom.removeEventListener('pointerdown', onPointerDown, { capture: true });
+      dom.removeEventListener('contextmenu', onContextMenu);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [camera, gl, orbitRef, setFlying]);
+
+  useFrame((_, delta) => {
+    if (!active.current || !pressed.current.size) return;
+    const boost = pressed.current.has('ShiftLeft') || pressed.current.has('ShiftRight') ? FLY_BOOST : 1;
+    const step = FLY_SPEED * boost * Math.min(delta, 0.1);
+
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    const move = new THREE.Vector3();
+    if (pressed.current.has('KeyW')) move.add(forward);
+    if (pressed.current.has('KeyS')) move.sub(forward);
+    if (pressed.current.has('KeyD')) move.add(right);
+    if (pressed.current.has('KeyA')) move.sub(right);
+    if (pressed.current.has('KeyE')) move.y += 1;
+    if (pressed.current.has('KeyQ')) move.y -= 1;
+    if (move.lengthSq() > 0) camera.position.addScaledVector(move.normalize(), step);
+    invalidate();
+  });
+
+  return null;
+}
+
 /**
  * Installs the right-drag gesture and keeps the frame loop awake while it runs.
  *
@@ -1346,6 +1476,7 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
       <DraftPreview />
       <ConstraintDrawPreview />
       <WalkthroughCamera orbitRef={orbitRef} />
+      <FlyNavigation orbitRef={orbitRef} />
 
       {objects
         .filter((object) => showConstraints || object.type !== 'constraint')
@@ -1442,6 +1573,31 @@ export function Viewport() {
           </div>
         </div>
       ) : null}
+      <NavHint />
+    </div>
+  );
+}
+
+/**
+ * Where the navigation scheme lives for anyone who has not found it yet.
+ *
+ * Bottom-left: the gizmo compass already owns bottom-right, and the bottom
+ * toolbar is a separate row below the canvas rather than an overlay on it, so
+ * nothing here competes with either.
+ */
+function NavHint() {
+  const flying = useEditor((s) => s.flying);
+  return (
+    <div className="pointer-events-none absolute bottom-3 left-3">
+      <div
+        className={`rounded-full border px-2.5 py-1 text-[10px] font-medium backdrop-blur transition-colors ${
+          flying
+            ? 'border-primary/40 bg-primary/15 text-primary'
+            : 'border-line/70 bg-surface/70 text-ink-subtle'
+        }`}
+      >
+        {flying ? 'Flying — WASD move · mouse look · Shift boost' : 'Hold right-click + WASD to fly · Numpad for views'}
+      </div>
     </div>
   );
 }
