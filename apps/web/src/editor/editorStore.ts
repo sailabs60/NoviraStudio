@@ -155,6 +155,17 @@ interface EditorState {
   toggleSelect: (id: string, additive: boolean) => void;
   clearSelection: () => void;
 
+  /**
+   * The live drag rectangle for box-select, in canvas CSS pixels.
+   *
+   * Read by an HTML overlay outside the Canvas — the rectangle is a 2D UI
+   * element, not a 3D one — while the detection that turns it into a
+   * selection runs inside the Canvas, where the camera lives. The store is
+   * the simplest thing both sides already share.
+   */
+  boxSelectRect: { x0: number; y0: number; x1: number; y1: number } | null;
+  setBoxSelectRect: (rect: { x0: number; y0: number; x1: number; y1: number } | null) => void;
+
   setTool: (tool: Tool) => void;
   setTransformMode: (mode: TransformMode) => void;
   setCameraMode: (mode: 'perspective' | 'top') => void;
@@ -451,6 +462,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     }),
 
   clearSelection: () => set({ selectedIds: [] }),
+
+  boxSelectRect: null,
+  setBoxSelectRect: (boxSelectRect) => set({ boxSelectRect }),
 
   setTool: (tool) => {
     // Leaving a drawing tool abandons a half-drawn run rather than leaving it

@@ -69,6 +69,19 @@ import { beginFloorDrag, registerFloorDrag, useFloorDrag } from './useFloorDrag'
 const DEG = Math.PI / 180;
 
 /**
+ * Set the instant a box-select drag resolves to a selection, and read (and
+ * cleared) by the ground plane's own click handler.
+ *
+ * The ground plane treats any click as "deselect everything", which is
+ * exactly right for a plain click and exactly wrong for the click-shaped
+ * pointerup that ends a box-select drag — react-three-fiber's synthetic click
+ * fires on pointerdown+pointerup hitting the same mesh with no minimum drag
+ * distance of its own, so without this the ground's handler would silently
+ * wipe the selection `BoxSelect` had just made a moment earlier.
+ */
+let boxSelectJustResolved = false;
+
+/**
  * Read a vector out of the document without trusting it.
  *
  * Scene documents come from a database, from imports, from collaborators and
@@ -311,6 +324,14 @@ function SceneNode({ object, selected }: { object: SceneObject; selected: boolea
        * so that is most of them. Same for the wall tool.
        */
       if (tool === 'draw' || tool === 'wall') return;
+
+      // The pointerup ending a box-select drag can land on an object as
+      // easily as on the ground, and looks the same as a click either way —
+      // see `boxSelectJustResolved`.
+      if (boxSelectJustResolved) {
+        boxSelectJustResolved = false;
+        return;
+      }
 
       event.stopPropagation();
       if (readOnly) return;
@@ -601,6 +622,14 @@ function Ground() {
   const onClick = useCallback(
     (event: ThreeEvent<MouseEvent>) => {
       event.stopPropagation();
+
+      // The pointerup ending a box-select drag looks like a click to
+      // three.js — same mesh under both pointerdown and pointerup — but the
+      // selection it just made is not this handler's to undo.
+      if (boxSelectJustResolved) {
+        boxSelectJustResolved = false;
+        return;
+      }
 
       if (tool === 'constraint') {
         const point = snapDraftPoint(event.point.x, event.point.z);
@@ -1369,6 +1398,155 @@ function FlyNavigation({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
   return null;
 }
 
+const BOX_SELECT_THRESHOLD_PX = 4;
+
+/**
+ * Hold Ctrl (or Cmd) and drag to select everything inside a rectangle —
+ * add Shift too, and the enclosed objects join the current selection instead
+ * of replacing it, the same rule a plain click already follows.
+ *
+ * Left-drag is already orbit, and unconditionally so — three's OrbitControls
+ * does not raycast, it grabs any left-drag on the canvas regardless of what
+ * is under the cursor. Gating this behind a modifier is what lets both
+ * gestures live on the same button without one stealing the other: a plain
+ * drag still orbits exactly as it always has, and only a modified one is
+ * ever treated as a selection rectangle.
+ *
+ * Objects are tested by their own stored position projected to screen space,
+ * not by a full bounding box — the same simplification Table Designer and
+ * the seating chart already make, and enough for "drag a box over this
+ * cluster of chairs" to work the way it looks like it should.
+ */
+function BoxSelect({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
+  const { camera, gl, size } = useThree();
+  const setBoxSelectRect = useEditor((s) => s.setBoxSelectRect);
+  const active = useRef(false);
+  const dragged = useRef(false);
+  const additive = useRef(false);
+  const start = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const dom = gl.domElement;
+    const toLocal = (e: PointerEvent) => {
+      const rect = dom.getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0 || !(e.ctrlKey || e.metaKey)) return;
+      if (useEditor.getState().tool !== 'select') return;
+      e.preventDefault();
+      active.current = true;
+      dragged.current = false;
+      additive.current = e.shiftKey;
+      start.current = toLocal(e);
+      const controls = orbitRef.current;
+      if (controls) controls.enabled = false;
+      setBoxSelectRect({ x0: start.current.x, y0: start.current.y, x1: start.current.x, y1: start.current.y });
+      dom.setPointerCapture(e.pointerId);
+      invalidate();
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!active.current) return;
+      const p = toLocal(e);
+      /*
+       * Set the moment the drag is unambiguous, not at pointerup.
+       *
+       * The pointerup that ends this drag reaches react-three-fiber's own
+       * click handling for whatever is under the cursor before it reaches
+       * this file's own window-level listener — bubbling goes canvas first,
+       * window last — so setting the flag in the pointerup handler is
+       * already too late to suppress that click. Setting it here, on an
+       * earlier and entirely separate pointermove event, sidesteps the
+       * ordering question altogether.
+       */
+      if (
+        !dragged.current &&
+        (Math.abs(p.x - start.current.x) >= BOX_SELECT_THRESHOLD_PX ||
+          Math.abs(p.y - start.current.y) >= BOX_SELECT_THRESHOLD_PX)
+      ) {
+        dragged.current = true;
+        boxSelectJustResolved = true;
+      }
+      setBoxSelectRect({ x0: start.current.x, y0: start.current.y, x1: p.x, y1: p.y });
+      invalidate();
+    };
+
+    const finish = (pointerId?: number) => {
+      if (!active.current) return;
+      active.current = false;
+      const controls = orbitRef.current;
+      if (controls) controls.enabled = true;
+      if (pointerId != null) {
+        try {
+          dom.releasePointerCapture(pointerId);
+        } catch {
+          /* already released */
+        }
+      }
+      setBoxSelectRect(null);
+      invalidate();
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (!active.current) return;
+      const wasDragged = dragged.current;
+      const p = toLocal(e);
+      const minX = Math.min(start.current.x, p.x);
+      const maxX = Math.max(start.current.x, p.x);
+      const minY = Math.min(start.current.y, p.y);
+      const maxY = Math.max(start.current.y, p.y);
+      const wasAdditive = additive.current;
+      finish(e.pointerId);
+
+      // Never moved past the threshold — the ground or object under the
+      // cursor answers this as the plain click it was, deselecting or
+      // toggling as it always has.
+      if (!wasDragged) return;
+
+      const state = useEditor.getState();
+      const hits: string[] = [];
+      const v = new THREE.Vector3();
+      for (const object of state.scene.objects) {
+        if (object.type === 'constraint' && !state.scene.showConstraints) continue;
+        v.set(mmToWorld(object.positionMm.x), mmToWorld(object.positionMm.y), mmToWorld(object.positionMm.z));
+        v.project(camera);
+        // Behind the camera — three still projects a point, but it is not
+        // actually on screen, and would otherwise land inside almost any box.
+        if (v.z > 1) continue;
+        const sx = (v.x * 0.5 + 0.5) * size.width;
+        const sy = (-v.y * 0.5 + 0.5) * size.height;
+        if (sx >= minX && sx <= maxX && sy >= minY && sy <= maxY) hits.push(object.id);
+      }
+
+      if (hits.length) {
+        state.select(wasAdditive ? [...new Set([...state.selectedIds, ...hits])] : hits);
+      } else if (!wasAdditive) {
+        state.clearSelection();
+      }
+    };
+
+    const onBlur = () => finish();
+
+    // Capture phase: guarantees `controls.enabled = false` lands before
+    // OrbitControls' own bubble-phase listener on the same element sees the
+    // same left-click and starts its default orbit.
+    dom.addEventListener('pointerdown', onPointerDown, { capture: true });
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      dom.removeEventListener('pointerdown', onPointerDown, { capture: true });
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [camera, gl, orbitRef, setBoxSelectRect, size]);
+
+  return null;
+}
+
 /**
  * Installs the right-drag gesture and keeps the frame loop awake while it runs.
  *
@@ -1525,6 +1703,7 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
       <ConstraintDrawPreview />
       <WalkthroughCamera orbitRef={orbitRef} />
       <FlyNavigation orbitRef={orbitRef} />
+      <BoxSelect orbitRef={orbitRef} />
 
       {objects
         .filter((object) => showConstraints || object.type !== 'constraint')
@@ -1626,6 +1805,7 @@ export function Viewport() {
         </div>
       ) : null}
       <NavHint />
+      <BoxSelectOverlay />
     </div>
   );
 }
@@ -1648,9 +1828,27 @@ function NavHint() {
             : 'border-line/70 bg-surface/70 text-ink-subtle'
         }`}
       >
-        {flying ? 'Flying — WASD move · mouse look · Shift boost' : 'Hold right-click + WASD to fly · Numpad for views'}
+        {flying
+          ? 'Flying — WASD move · mouse look · Shift boost'
+          : 'Right-click + WASD to fly · Ctrl-drag to box-select · Numpad for views'}
       </div>
     </div>
+  );
+}
+
+/** The live drag rectangle for box-select — a 2D overlay, not a 3D one. */
+function BoxSelectOverlay() {
+  const rect = useEditor((s) => s.boxSelectRect);
+  if (!rect) return null;
+  const left = Math.min(rect.x0, rect.x1);
+  const top = Math.min(rect.y0, rect.y1);
+  const width = Math.abs(rect.x1 - rect.x0);
+  const height = Math.abs(rect.y1 - rect.y0);
+  return (
+    <div
+      className="pointer-events-none absolute border border-primary bg-primary/10"
+      style={{ left, top, width, height }}
+    />
   );
 }
 
