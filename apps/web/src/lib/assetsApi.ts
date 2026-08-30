@@ -38,6 +38,15 @@ export interface ProviderAsset {
   purchaseUrl?: string | null;
   faceCount?: number | null;
   triangleCount?: number | null;
+  /**
+   * For a plain-JSON glTF (as opposed to a packed `.glb`): every sibling file
+   * it references by relative path — its geometry buffer and its textures —
+   * mapped to where each one actually lives. Poly Haven's model format is
+   * exactly this shape. Carried through import so the server can fetch the
+   * whole bundle rather than just the JSON, which loads and then 404s on its
+   * own buffer.
+   */
+  gltfIncludes?: Record<string, string> | null;
 }
 
 export interface AssetPage {
@@ -127,6 +136,7 @@ export const assets = {
       description: asset.description ?? null,
       tags: asset.tags?.slice(0, 40) ?? [],
       categorySlug: categorySlug ?? null,
+      gltfIncludes: asset.gltfIncludes ?? null,
     });
     return data;
   },

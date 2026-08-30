@@ -260,6 +260,16 @@ const importBody = z.object({
   tags: z.array(z.string().max(60)).max(40).optional(),
   /** Category the user chose. Left out, the name is classified instead. */
   categorySlug: z.string().max(140).optional().nullable(),
+  /**
+   * The sibling files a plain-JSON glTF references by relative path — its
+   * `.bin` buffer and every texture — mapped to where each one actually lives
+   * upstream. A `.glb` packs all of this into one binary and needs nothing
+   * here; Poly Haven's `.gltf` format is exactly this JSON-plus-parts shape,
+   * and without these, the file this route just saved cites buffers that were
+   * never downloaded — the model resolves, downloads, and then fails to load
+   * with a 404 on its own `.bin`.
+   */
+  gltfIncludes: z.record(z.string().url().max(2048)).optional().nullable(),
 });
 
 const CATEGORY_SLUGS = new Set<string>(CATALOG_CATEGORIES.map((c) => c.slug));
@@ -359,6 +369,42 @@ assetsRouter.post(
           ? 'That model is larger than Novira will import. Try a lower-detail version.'
           : 'The source could not be downloaded. It may have moved or require an account.'
       );
+    }
+
+    /*
+     * The rest of a plain-JSON glTF.
+     *
+     * `.glb` is one binary file and this loop never runs. A `.gltf` is a JSON
+     * document that references its own geometry buffer and every texture by a
+     * *relative* path sitting beside it — Poly Haven, in particular, ships
+     * exactly this shape. Saving only the JSON leaves those references
+     * pointing at nothing: the import reports success, and the model then
+     * fails to load with a 404 on its own `.bin` the first time it is dropped
+     * into a scene. Each entry here is fetched to the same relative position
+     * next to the file just saved, so the loader's relative references resolve
+     * exactly as they do upstream.
+     *
+     * Best-effort: a missing texture is a visibly grey surface, which is
+     * recoverable by re-importing. A missing geometry buffer is not, so that
+     * one failure is the one this rethrows for.
+     */
+    if (resolved.format === 'gltf' && body.gltfIncludes) {
+      const baseDir = path.posix.dirname(relative);
+      for (const [relPath, fileUrl] of Object.entries(body.gltfIncludes)) {
+        const siblingRelative = path.posix.normalize(path.posix.join(baseDir, relPath));
+        // Never let an upstream-supplied relative path escape the model's own
+        // folder — `../../whatever` would otherwise write outside it.
+        if (!siblingRelative.startsWith(baseDir + path.posix.sep) && siblingRelative !== baseDir) continue;
+        try {
+          await downloadToAssets(fileUrl, siblingRelative, { timeoutMs: 60_000, maxBytes: 40 * 1024 * 1024 });
+        } catch (error) {
+          const isBuffer = /\.bin$/i.test(relPath);
+          if (isBuffer) {
+            throw new ApiError(502, 'IMPORT_FAILED', 'The model geometry could not be downloaded. Try again.');
+          }
+          console.warn(`[assets.import] texture "${relPath}" for ${body.name} failed:`, error);
+        }
+      }
     }
 
     /*
