@@ -1,15 +1,22 @@
 import { useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MoreHorizontal, Plus, Trash2, Pencil } from 'lucide-react';
+import { MoreHorizontal, Plus, Sparkles, Trash2, Pencil } from 'lucide-react';
 import { api, ApiClientError } from '../lib/api';
 import { AppShell } from '../components/AppShell';
 import { Figure } from '../landing/pieces';
 import { Modal } from '../components/Modal';
 import { Spinner } from '../components/Spinner';
 
+/** A plan started with no name typed at all gets one that says so, plainly. */
+function untitledEventName(): string {
+  const stamp = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(new Date());
+  return `New event, ${stamp}`;
+}
+
 export function DashboardPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { data: projects, isLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: api.projects.list,
@@ -49,6 +56,33 @@ export function DashboardPage() {
     create.mutate(undefined, { onSettled: () => { submittingRef.current = false; } });
   };
 
+  /*
+   * One click from the dashboard straight into a canvas.
+   *
+   * The named flow — New project, then New plan inside it — is right for
+   * someone who already knows what event this is. It is two forms and a
+   * navigation for someone who does not, and does not want to decide that
+   * before they have even seen the tool. This creates both records with a
+   * placeholder name and lands directly in the editor; the name is a label
+   * on the project card afterwards, renamed in two clicks whenever it
+   * matters, not a gate in front of starting.
+   */
+  const quickStart = useMutation({
+    mutationFn: async () => {
+      const name = untitledEventName();
+      const project = await api.projects.create(name);
+      return api.plans.create(project.id, 'Untitled plan');
+    },
+    onSuccess: (plan) => navigate(`/editor/${plan.id}`),
+    onError: (err) => setError(err instanceof ApiClientError ? err.message : 'Could not start a new plan.'),
+  });
+  const quickStartRef = useRef(false);
+  const startQuick = () => {
+    if (quickStartRef.current) return;
+    quickStartRef.current = true;
+    quickStart.mutate(undefined, { onSettled: () => { quickStartRef.current = false; } });
+  };
+
   const remove = useMutation({
     mutationFn: (id: number) => api.projects.remove(id),
     onSuccess: () => {
@@ -68,9 +102,20 @@ export function DashboardPage() {
             Each project holds the plans for one event.
           </p>
         </div>
-        <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
-          <Plus className="h-4 w-4" /> New project
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button type="button" className="btn-secondary" onClick={() => setCreating(true)}>
+            <Plus className="h-4 w-4" /> New project
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={quickStart.isPending}
+            onClick={startQuick}
+            title="Skip naming anything — start designing straight away"
+          >
+            <Sparkles className="h-4 w-4" /> {quickStart.isPending ? 'Starting…' : 'New plan'}
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -93,9 +138,19 @@ export function DashboardPage() {
                 A project holds one event. Inside it, each plan is one space you are laying out — a hall, a stand, a
                 stage. Everything else in Novira works off those plans.
               </p>
-              <button type="button" className="btn-primary mt-5" onClick={() => setCreating(true)}>
-                <Plus className="h-4 w-4" /> Create your first project
-              </button>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={quickStart.isPending}
+                  onClick={startQuick}
+                >
+                  <Sparkles className="h-4 w-4" /> {quickStart.isPending ? 'Starting…' : 'Jump straight in'}
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => setCreating(true)}>
+                  <Plus className="h-4 w-4" /> Name it first
+                </button>
+              </div>
             </div>
             <Figure
               dir="app"
