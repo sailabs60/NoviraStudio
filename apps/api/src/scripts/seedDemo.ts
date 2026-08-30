@@ -16,6 +16,14 @@ import { grantMonthly, recompute } from '../services/credits.js';
 
 const PASSWORD = process.env.DEMO_PASSWORD ?? 'novira123';
 const COMPANY_NAME = 'Ashgrove Event Hire';
+/**
+ * `.test` is the right choice for local dev and the e2e scripts — it is the
+ * TLD reserved by RFC 2606 for exactly this, so it can never collide with a
+ * real address. A deployment that people actually sign into is not that
+ * situation: seeding real-looking demo accounts there wants a domain that
+ * reads as a normal email, hence the override.
+ */
+const DOMAIN = process.env.DEMO_EMAIL_DOMAIN ?? 'novira.test';
 
 type DemoUser = {
   email: string;
@@ -30,7 +38,7 @@ type DemoUser = {
 
 const USERS: DemoUser[] = [
   {
-    email: 'planner@novira.test',
+    email: `planner@${DOMAIN}`,
     firstName: 'Ada',
     lastName: 'Planner',
     role: 'super_admin',
@@ -39,7 +47,7 @@ const USERS: DemoUser[] = [
     seat: null,
   },
   {
-    email: 'studio@novira.test',
+    email: `studio@${DOMAIN}`,
     firstName: 'Sam',
     lastName: 'Studio',
     role: 'user',
@@ -50,7 +58,7 @@ const USERS: DemoUser[] = [
     seat: { role: 'admin', visibility: 'company_wide' },
   },
   {
-    email: 'designer@novira.test',
+    email: `designer@${DOMAIN}`,
     firstName: 'Dee',
     lastName: 'Designer',
     role: 'user',
@@ -90,7 +98,7 @@ async function upsertCompany() {
   return prisma.company.create({
     data: {
       name: COMPANY_NAME,
-      mainEmail: 'studio@novira.test',
+      mainEmail: `studio@${DOMAIN}`,
       city: 'Bristol',
       country: 'GB',
       creditMode: 'pooled',
