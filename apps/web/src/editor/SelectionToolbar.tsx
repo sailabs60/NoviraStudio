@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
-import { Copy, Move, RotateCw, Scaling, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Brush, Copy, Move, RotateCw, Scaling, Sticker, Trash2 } from 'lucide-react';
 import { useEditor } from './editorStore';
 import { useSelectedObjects } from './selectors';
+import { ObjectQuickActions } from './ObjectQuickActions';
 
 /**
  * The selection toolbar.
@@ -32,6 +33,12 @@ export function SelectionToolbar() {
   const duplicateSelected = useEditor((s) => s.duplicateSelected);
   const deleteSelected = useEditor((s) => s.deleteSelected);
   const tool = useEditor((s) => s.tool);
+  const [quick, setQuick] = useState<'material' | 'art' | null>(null);
+
+  // A window about the selection has no subject once the selection is gone.
+  useEffect(() => {
+    if (!selected.length) setQuick(null);
+  }, [selected.length]);
 
   // The keyboard shortcuts the status bar promises.
   useEffect(() => {
@@ -78,6 +85,38 @@ export function SelectionToolbar() {
 
         <span className="mx-0.5 h-5 w-px bg-line" />
 
+        {/*
+          The two edits that used to be several panels away — a finish, and a
+          client's artwork — put where the selection already is.
+        */}
+        <button
+          type="button"
+          title="Change the finish on the selection"
+          aria-expanded={quick === 'material'}
+          onClick={() => setQuick(quick === 'material' ? null : 'material')}
+          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition ${
+            quick === 'material' ? 'bg-primary text-primary-fg' : 'text-ink-muted hover:bg-surface-muted hover:text-ink'
+          }`}
+        >
+          <Brush className="h-3.5 w-3.5" />
+          Material
+        </button>
+
+        <button
+          type="button"
+          title="Stand artwork in front of the selection"
+          aria-expanded={quick === 'art'}
+          onClick={() => setQuick(quick === 'art' ? null : 'art')}
+          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition ${
+            quick === 'art' ? 'bg-primary text-primary-fg' : 'text-ink-muted hover:bg-surface-muted hover:text-ink'
+          }`}
+        >
+          <Sticker className="h-3.5 w-3.5" />
+          Add art
+        </button>
+
+        <span className="mx-0.5 h-5 w-px bg-line" />
+
         <button
           type="button"
           title="Duplicate (Shift+Drag)"
@@ -102,6 +141,8 @@ export function SelectionToolbar() {
           <span className="px-2 text-xs font-semibold text-ink-subtle">{selected.length}</span>
         ) : null}
       </div>
+
+      {quick ? <ObjectQuickActions action={quick} onClose={() => setQuick(null)} /> : null}
     </div>
   );
 }

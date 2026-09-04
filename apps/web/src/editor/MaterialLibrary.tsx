@@ -204,7 +204,7 @@ function BuiltInMaterials() {
   );
 }
 
-function MaterialSwatch({ material }: { material: BuiltInMaterial }) {
+export function MaterialSwatch({ material }: { material: BuiltInMaterial }) {
   const dragging = useDrag((s) => s.payload);
   const selected = useSelectedObjects();
   const applyFinish = useEditor((s) => s.applyFinish);
