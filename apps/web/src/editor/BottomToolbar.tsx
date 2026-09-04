@@ -18,6 +18,7 @@ import { useEditor } from './editorStore';
 import { ImportFlow } from './ImportFlow';
 import { HelpTip } from '../components/ui';
 import { SaveViewButton } from './SavedViews';
+import { FloorPicker } from './FloorPicker';
 
 /**
  * The bar along the very bottom.
@@ -186,7 +187,9 @@ export function BottomToolbar({
 
       <span className="mx-1 h-5 w-px shrink-0 bg-line" aria-hidden />
 
-      {/* ── Environment ─────────────────────────────────────────────── */}
+      {/* ── The room's own look ─────────────────────────────────────── */}
+      <FloorPicker labelled={showEnvironmentLabel} />
+
       <button
         type="button"
         className="ed-action shrink-0"

@@ -139,7 +139,15 @@ function useHorizonFade(color: string): THREE.Texture {
  * transparent in the middle where the work happens, solid at the rim where the
  * floor would otherwise meet the sky in a hard line.
  */
-function StudioGround({ color, fadeColor }: { color: string; fadeColor: string }) {
+function StudioGround({
+  color,
+  roughness,
+  fadeColor,
+}: {
+  color: string;
+  roughness: number;
+  fadeColor: string;
+}) {
   const fade = useHorizonFade(fadeColor);
   useEffect(() => () => fade.dispose(), [fade]);
 
@@ -147,7 +155,7 @@ function StudioGround({ color, fadeColor }: { color: string; fadeColor: string }
     <>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.002, 0]} receiveShadow raycast={() => null}>
         <planeGeometry args={[600, 600]} />
-        <meshStandardMaterial color={color} roughness={0.96} metalness={0} />
+        <meshStandardMaterial color={color} roughness={roughness} metalness={0} />
       </mesh>
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} renderOrder={-900} raycast={() => null}>
@@ -174,7 +182,19 @@ export function StudioStage3D() {
   const profile = useRendererProfile();
 
   const showBackdrop = !lighting.showEnvironmentBackground;
-  const ground = lighting.groundColor ?? '#e4e9f1';
+
+  /*
+   * The studio floor takes the plan's own floor finish.
+   *
+   * The finished floor is only ever as big as the plan — ten metres for a
+   * single table — so surfacing the room in carpet used to leave a small
+   * island of it sitting on a pale studio ground that stretched to the
+   * horizon, and the room read as a diagram on a light box rather than a
+   * floor. Taking the colour out to the horizon is what makes it a hall.
+   */
+  const floorFinish = useEditor((s) => s.scene.floorFinish);
+  const ground = floorFinish?.colorHex ?? lighting.groundColor ?? '#c9ccd1';
+  const groundRoughness = floorFinish?.roughness ?? 0.96;
 
   /*
    * The backdrop palette is derived from the ground colour rather than fixed,
@@ -212,28 +232,54 @@ export function StudioStage3D() {
    */
   const wantsContact = render.contactShadows && !profile.software && objectCount > 0;
 
+  // Sized to the plan, for the same resolution reason as the shadow camera.
+  const objects = useEditor((s) => s.scene.objects);
+  const contactScale = useMemo(() => {
+    let maxMm = 0;
+    for (const object of objects) {
+      const at = object.positionMm;
+      maxMm = Math.max(maxMm, Math.abs(at?.x ?? 0), Math.abs(at?.z ?? 0));
+    }
+    return THREE.MathUtils.clamp((maxMm / 1000) * 2.8 + 8, 10, 90);
+  }, [objects]);
+
   return (
     <>
       {showBackdrop ? (
         <>
           <Backdrop zenith={palette.zenith} horizon={palette.horizon} ground={palette.below} />
-          <StudioGround color={ground} fadeColor={palette.horizon} />
+          <StudioGround color={ground} roughness={groundRoughness} fadeColor={palette.horizon} />
         </>
       ) : (
         // With a real sky behind the room the ground still has to exist, but it
         // gets the sky's own haze as its dissolve.
-        <StudioGround color={ground} fadeColor={palette.horizon} />
+        <StudioGround color={ground} roughness={groundRoughness} fadeColor={palette.horizon} />
       )}
 
       {wantsContact ? (
+        /*
+         * Re-baked whenever the plan changes, and scaled to it.
+         *
+         * `frames={1}` renders the shadow pass exactly once — and models
+         * stream in from the network well after that, so the one frame it
+         * captured was of an empty floor and every object sat on nothing.
+         * Keying on the object count remounts it, which is what makes the
+         * shadows appear under things that arrived late.
+         *
+         * The scale used to be a fixed 90 m for the same reason the shadow
+         * camera was: it is cheap to write and it throws away almost all of
+         * the resolution. A single table now gets a shadow with an edge
+         * rather than a grey haze.
+         */
         <ContactShadows
+          key={`${objectCount}`}
           position={[0, 0.006, 0]}
-          scale={90}
+          scale={contactScale}
           resolution={1024}
-          far={14}
-          blur={2.6}
-          opacity={0.42}
-          color="#1a2434"
+          far={9}
+          blur={2.2}
+          opacity={0.55}
+          color="#131c2b"
           frames={1}
         />
       ) : null}

@@ -555,7 +555,14 @@ export const DEFAULT_LIGHTING: SceneLighting = {
   customHdriLabel: null,
   showEnvironmentBackground: false,
   environmentRotationDeg: 0,
-  groundColor: '#e4e9f1',
+  /*
+   * The studio floor beyond the plan's own — a real mid-tone rather than the
+   * near-white it used to be. The backdrop gradient is derived from this, so
+   * a pale value gave the whole viewport the flat white void that made a
+   * finished plan read as a diagram. Around the same value as the default
+   * concrete floor, so the hall appears to continue past the walls.
+   */
+  groundColor: '#c9ccd1',
   position: { x: 5, y: 10, z: 5 },
   heightZ: 10,
   shadowsEnabled: true,
@@ -776,6 +783,33 @@ export interface SceneDocument {
   floorFinish?: SurfaceFinish | null;
 }
 
+/**
+ * What a new plan stands on.
+ *
+ * Grey event carpet, because it is what is actually rolled out under most of
+ * the work this tool is used for, and because a plan that opens on a flat
+ * near-white void reads as a diagram rather than a room — furniture with
+ * nothing under it looks like it is floating whatever else the renderer does.
+ *
+ * Mid-tone rather than the pale concrete slab tried first: a light grey floor
+ * sits close enough to full exposure that shadows have nowhere left to darken,
+ * so the room stayed flat no matter how the lighting was balanced. This has
+ * somewhere to go, which is what makes the contact shadows read.
+ *
+ * Replaced the moment a designer picks a different floor, and priced by area
+ * with everything else — see the Floor control on the bottom toolbar.
+ */
+export const DEFAULT_FLOOR_FINISH: SurfaceFinish = {
+  materialId: 'builtin:carpet-grey',
+  label: 'Event carpet, grey',
+  source: 'Novira',
+  license: 'Included',
+  colorHex: '#63676d',
+  roughness: 0.96,
+  metalness: 0,
+  tileMm: 800,
+};
+
 export function createEmptyScene(units: UnitSystem = 'imperial'): SceneDocument {
   return {
     schemaVersion: SCENE_SCHEMA_VERSION,
@@ -783,6 +817,7 @@ export function createEmptyScene(units: UnitSystem = 'imperial'): SceneDocument 
     objects: [],
     tableGroups: [],
     walls: { segments: [], floors: [] },
+    floorFinish: { ...DEFAULT_FLOOR_FINISH },
     lighting: { ...DEFAULT_LIGHTING },
     camera: { ...DEFAULT_CAMERA, path: [] },
     floorPlan: null,

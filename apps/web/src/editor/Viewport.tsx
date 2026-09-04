@@ -1583,6 +1583,7 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
   const objects = useVisibleObjects();
   const selectedIds = useEditor((s) => s.selectedIds);
   const showGrid = useEditor((s) => s.showGrid);
+  const walls = useEditorShallow((s) => s.scene.walls.segments);
   const lighting = useEditor((s) => s.scene.lighting);
   const cameraMode = useEditor((s) => s.cameraMode);
   const showConstraints = useEditor((s) => s.scene.showConstraints);
@@ -1595,6 +1596,32 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
   const shadowsWanted = lighting.shadowsEnabled && profile.shadowMapSize > 0;
 
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  /*
+   * Fit the shadow camera to what is actually in the plan.
+   *
+   * It used to be a fixed 80 m square, which on a 1024 px map is thirteen
+   * texels to the metre — a chair leg is a third of one, so its shadow was a
+   * grey smudge or nothing at all, and every object read as floating. Sized
+   * to the content instead, a single round table gets the whole map, and the
+   * shadows are what tell you the chairs are standing on the floor.
+   */
+  const shadowExtent = useMemo(() => {
+    let maxMm = 0;
+    for (const object of objects) {
+      const at = vec3(object.positionMm);
+      maxMm = Math.max(maxMm, Math.abs(at.x), Math.abs(at.z));
+    }
+    for (const segment of walls) {
+      for (const point of [segment?.start, segment?.end]) {
+        if (!point) continue;
+        maxMm = Math.max(maxMm, Math.abs(point.xMm ?? 0), Math.abs(point.zMm ?? 0));
+      }
+    }
+    // A little past the furthest thing, never smaller than a small room and
+    // never larger than the old fixed frustum.
+    return THREE.MathUtils.clamp(mmToWorld(maxMm) * 1.35 + 4, 8, 40);
+  }, [objects, walls]);
 
   return (
     <>
@@ -1613,7 +1640,7 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
       <SceneEnvironment
         preset={lighting.preset}
         customUrl={lighting.customHdriUrl ?? null}
-        intensity={0.85 * (lighting.intensity ?? 1)}
+        intensity={0.45 * (lighting.intensity ?? 1)}
         background={Boolean(lighting.showEnvironmentBackground)}
         rotationDeg={lighting.environmentRotationDeg ?? 0}
       />
@@ -1633,22 +1660,32 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
         objects separate from the backdrop instead of dissolving into it. Piling
         on ambient is what makes a 3D view look flat and plastic.
       */}
-      <ambientLight intensity={0.28} />
-      <hemisphereLight args={['#eef3fb', '#c8cdd6', 0.5]} />
+      {/*
+       * Rebalanced down, because the sum was the problem.
+       *
+       * Ambient 0.28 + hemisphere 0.5 + key 1.35 + fill 0.32 + an environment
+       * map at 0.85 is over three times a full exposure. Every mid-tone
+       * clipped to white, which is why a concrete floor rendered as paper and
+       * why the shadows — which were being drawn correctly — had nothing left
+       * to darken. The key still does the shaping; there is simply room below
+       * white for it to shape into now.
+       */}
+      <ambientLight intensity={0.05} />
+      <hemisphereLight args={['#eef3fb', '#aab2bf', 0.14]} />
       <directionalLight
         position={[lighting.position.x, lighting.heightZ, lighting.position.z]}
-        intensity={1.35}
+        intensity={0.95}
         castShadow={shadowsWanted}
         shadow-mapSize={[profile.shadowMapSize || 512, profile.shadowMapSize || 512]}
-        shadow-camera-left={-40}
-        shadow-camera-right={40}
-        shadow-camera-top={40}
-        shadow-camera-bottom={-40}
+        shadow-camera-left={-shadowExtent}
+        shadow-camera-right={shadowExtent}
+        shadow-camera-top={shadowExtent}
+        shadow-camera-bottom={-shadowExtent}
         shadow-camera-far={120}
         shadow-bias={-0.0004}
         shadow-normalBias={0.02}
       />
-      <directionalLight position={[-9, 7, -7]} intensity={0.32} color="#dce8ff" />
+      <directionalLight position={[-9, 7, -7]} intensity={0.14} color="#dce8ff" />
 
       {showGrid ? (
         profile.software ? (
