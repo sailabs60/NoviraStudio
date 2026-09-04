@@ -28,12 +28,25 @@ import { emptyVenueSpec } from '@novira/shared';
 import { prisma } from '../lib/prisma.js';
 import { prepareVenueModel } from '../services/venueModel.js';
 import { saveAssetBuffer } from '../services/storage.js';
+import { env } from '../lib/env.js';
 
-/** Where the raw building model is expected to sit before import. */
+/**
+ * Where the building model is expected to sit before import.
+ *
+ * The raw export is 112 MB and git-ignored, so it exists on a workstation and
+ * never in a deployment. The importer's own output is 2.4 MB, though, which is
+ * small enough to keep on the server's asset volume — so a prepared model
+ * counts as a source too, and re-preparing one is cheap. That is how the
+ * building reaches production without the 112 MB original ever going near a
+ * repository. `ROTANA_MODEL` overrides all of it.
+ */
 const SOURCE_CANDIDATES = [
+  ...(process.env.ROTANA_MODEL ? [path.resolve(process.env.ROTANA_MODEL)] : []),
   path.resolve(process.cwd(), '../../rotana for apoli.glb'),
   path.resolve(process.cwd(), 'rotana for apoli.glb'),
   path.resolve(process.cwd(), '../../storage/venues/rotana for apoli.glb'),
+  path.join(env.assetDir, 'venues/source/johari-rotana.glb'),
+  path.join(env.assetDir, 'venues/johari-rotana.glb'),
 ];
 
 const BUILDING = 'Johari Rotana';
