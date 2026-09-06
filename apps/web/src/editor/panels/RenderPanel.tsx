@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Camera, Download, Image as ImageIcon, Sparkles, X, Zap } from 'lucide-react';
+import { Camera, Download, Image as ImageIcon, Sparkles, Zap } from 'lucide-react';
 import { STILL_PRESETS } from '@novira/shared';
 import { useEditor } from '../editorStore';
 import { captureAtSize, maxRenderSize, rendererAvailable, saveDataUrl } from '../highResCapture';
 import { pollJob, spatial, type AiJobLike } from '../../lib/spatialApi';
+import { AiProgress } from '../../components/AiProgress';
 import {
   EmptyState,
   Field,
-  ProgressBar,
   Section,
   Segmented,
   Select,
@@ -45,6 +45,8 @@ export function RenderPanel() {
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState<null | 'fast' | 'pro'>(null);
   const [job, setJob] = useState<AiJobLike | null>(null);
+  // When the current run began, for the elapsed clock in the progress card.
+  const [startedAt, setStartedAt] = useState<number | null>(null);
   const [lastFast, setLastFast] = useState<{ dataUrl: string; width: number; height: number; clamped: boolean } | null>(null);
 
   const { data: capabilities } = useQuery({
@@ -69,6 +71,7 @@ export function RenderPanel() {
       return;
     }
     setBusy('fast');
+    setStartedAt(Date.now());
     // A frame, so the button's pressed state paints before the renderer blocks
     // the main thread for a second at 4K.
     window.requestAnimationFrame(() => {
@@ -99,6 +102,7 @@ export function RenderPanel() {
       return;
     }
     setBusy('pro');
+    setStartedAt(Date.now());
     try {
       /*
        * The frame sent to the model is deliberately not 4K. Image models take a
@@ -223,20 +227,21 @@ export function RenderPanel() {
 
         {job && (job.status === 'queued' || job.status === 'in_progress') ? (
           <div className="mt-2">
-            <ProgressBar value={job.progress} label="Working" />
-            <button
-              type="button"
-              className="ed-action mt-1 w-full justify-center"
-              onClick={() => {
+            <AiProgress
+              progress={job.progress}
+              status={job.status}
+              startedAt={startedAt ?? Date.now()}
+              // Measured against the live provider: a 2K render lands near two
+              // minutes, so "longer than usual" means something.
+              expectedMs={120_000}
+              onCancel={() => {
                 void spatial.ai.cancel(job.id).then(() => {
                   setJob(null);
                   setBusy(null);
                   toast('info', 'Cancelled. Your credits have been returned.');
                 });
               }}
-            >
-              <X className="h-3.5 w-3.5" /> Cancel
-            </button>
+            />
           </div>
         ) : null}
 

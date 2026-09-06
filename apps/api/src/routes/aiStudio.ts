@@ -422,11 +422,14 @@ function creationDto(row: {
 async function waitFor(
   ctx: JobContext,
   poll: () => Promise<TaskStatus>,
-  opts: { timeoutMs?: number; from?: number; to?: number } = {}
+  opts: { timeoutMs?: number; from?: number; to?: number; expectedMs?: number } = {}
 ): Promise<TaskStatus> {
   const deadline = Date.now() + (opts.timeoutMs ?? 10 * 60_000);
   const from = opts.from ?? 20;
   const to = opts.to ?? 92;
+  const expected = opts.expectedMs ?? 60_000;
+  const startedAt = Date.now();
+  let highest = from;
 
   while (Date.now() < deadline) {
     if (await ctx.isCancelled()) throw new ApiError(499, 'CANCELLED', 'Cancelled.');
@@ -437,7 +440,33 @@ async function waitFor(
     if (status.status === 'failed') {
       throw new ApiError(502, 'PROVIDER_ERROR', status.error ?? 'The generation failed.');
     }
-    await ctx.report(Math.min(to, from + Math.round(((to - from) * (status.progress ?? 0)) / 100)));
+
+    /*
+     * Progress, whether or not the provider reports any.
+     *
+     * Tripo returns a real percentage; Nano Banana returns none at all, so a
+     * mockup used to show four numbers across two minutes and read as frozen
+     * — the same complaint as a genuine hang, for a job that was working.
+     *
+     * When the provider is silent this falls back to an estimate from elapsed
+     * time, shaped so it slows as it goes and asymptotically approaches `to`
+     * without ever arriving. That is honest in the way that matters: it never
+     * claims to be finished before the result exists, and it never goes
+     * backwards, because a bar that retreats destroys more confidence than a
+     * slow one.
+     */
+    const reported = status.progress ?? 0;
+    const elapsed = Date.now() - startedAt;
+    const estimated = from + (to - from) * (1 - Math.exp(-elapsed / expected));
+    const next =
+      reported > 0
+        ? Math.min(to, from + ((to - from) * reported) / 100)
+        : estimated;
+
+    if (next > highest) {
+      highest = next;
+      await ctx.report(Math.round(highest));
+    }
   }
   throw new ApiError(504, 'PROVIDER_TIMEOUT', 'The generation took too long. Your credits have been returned.');
 }
@@ -530,7 +559,11 @@ registerHandler('ai_mockup', async (ctx) => {
     }));
   }
 
-  const finished = await waitFor(ctx, () => mockup.poll(taskId, api), { timeoutMs: 6 * 60_000 });
+  const finished = await waitFor(ctx, () => mockup.poll(taskId, api), {
+    timeoutMs: 6 * 60_000,
+    // Measured against the live provider: a 2K mockup lands near two minutes.
+    expectedMs: 110_000,
+  });
   await ctx.report(94);
 
   const stored = await adopt(finished, 'generated/mockups');

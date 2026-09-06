@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, Eye, EyeOff, Library, Loader2, Lock, Sparkles, Upload, X } from 'lucide-react';
+import { AiProgress } from '../components/AiProgress';
 import { http, ApiClientError } from '../lib/api';
 import { useEditor } from './editorStore';
 import { captureViewport } from './capture';
@@ -250,7 +251,7 @@ export function AiPanel() {
             </div>
             {enhanceCap ? (
               <p className="text-xs text-ink-subtle">
-                {enhanceCap.cost} credits · you have {enhanceCap.balance} · provider {enhanceCap.provider}
+                {enhanceCap.cost} credits · you have {balanceLabel(enhanceCap.balance)} · provider {enhanceCap.provider}
               </p>
             ) : null}
           </div>
@@ -378,7 +379,7 @@ export function AiPanel() {
             </ul>
             {to3dCap ? (
               <p className="text-xs text-ink-subtle">
-                {to3dCap.cost} credits · you have {to3dCap.balance} · provider {to3dCap.provider}
+                {to3dCap.cost} credits · you have {balanceLabel(to3dCap.balance)} · provider {to3dCap.provider}
               </p>
             ) : null}
           </div>
@@ -397,19 +398,49 @@ export function AiPanel() {
   );
 }
 
+/**
+ * The running job.
+ *
+ * A bare percentage was the whole problem: it told the user something was
+ * happening and nothing about what, so a slow phase was indistinguishable
+ * from a hang. `AiProgress` names the stage, shows the clock, and says so
+ * out loud once a job passes the time these normally take.
+ *
+ * The start time is taken from the first render rather than threaded through
+ * every caller — the panel mounts this the moment a job begins, so they are
+ * the same instant to within a frame.
+ */
+/**
+ * How many credits the user has, in words a person would use.
+ *
+ * The server reports an unlimited allowance as `Number.MAX_SAFE_INTEGER`,
+ * which is a fine sentinel and a terrible thing to print — the dialog was
+ * telling super admins they had 9,007,199,254,740,991 credits. Anything near
+ * that ceiling is unlimited; everything else is a real number worth showing.
+ */
+function balanceLabel(balance: number): string {
+  if (!Number.isFinite(balance) || balance >= Number.MAX_SAFE_INTEGER / 2) return 'unlimited credits';
+  return `${balance.toLocaleString()} credits`;
+}
+
 function JobProgress({ job, label }: { job: Job; label: string }) {
+  const [startedAt] = useState(() => Date.now());
   return (
-    <div className="py-4">
-      <div className="mb-2 flex items-center gap-2 text-sm text-ink">
-        <Loader2 className="h-4 w-4 animate-spin text-primary" />
-        {label}… {job.progress}%
-      </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-muted">
-        <div className="h-full bg-primary transition-all" style={{ width: `${Math.max(4, job.progress)}%` }} />
-      </div>
-      <p className="mt-2 text-xs text-ink-subtle">
-        Keep this open. Cancelling refunds the {job.creditsCharged} credits already charged.
-      </p>
+    <div className="py-3">
+      <AiProgress
+        progress={job.progress}
+        status={job.status}
+        startedAt={startedAt}
+        // Both of this panel's jobs are provider round trips of roughly this
+        // length; past 1.6x it says it is slow rather than leaving a silence.
+        expectedMs={120_000}
+        note={
+          job.creditsCharged > 0
+            ? `Cancelling refunds the ${job.creditsCharged} credits already charged.`
+            : 'You can keep working — this finishes in the background.'
+        }
+      />
+      <p className="mt-1.5 text-[10px] text-ink-subtle">{label}</p>
     </div>
   );
 }
