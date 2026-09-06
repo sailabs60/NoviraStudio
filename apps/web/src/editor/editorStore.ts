@@ -179,6 +179,17 @@ interface EditorState {
   selectionAnchor: { x: number; top: number; bottom: number } | null;
   setSelectionAnchor: (anchor: { x: number; top: number; bottom: number } | null) => void;
 
+  /**
+   * The LED screen whose in-viewport editor is open, if any.
+   *
+   * Opened by double-clicking a screen. Held in the store rather than in the
+   * viewport's own state because the panel is drawn outside the Canvas — the
+   * 3D object knows it was double-clicked, and the HTML that has to appear is
+   * a sibling of the Canvas, not a child.
+   */
+  ledQuickEditId: string | null;
+  setLedQuickEditId: (id: string | null) => void;
+
   setTool: (tool: Tool) => void;
   setTransformMode: (mode: TransformMode) => void;
   setCameraMode: (mode: 'perspective' | 'top') => void;
@@ -510,6 +521,9 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   selectionAnchor: null,
   setSelectionAnchor: (selectionAnchor) => set({ selectionAnchor }),
+
+  ledQuickEditId: null,
+  setLedQuickEditId: (ledQuickEditId) => set({ ledQuickEditId }),
 
   setTool: (tool) => {
     // Leaving a drawing tool abandons a half-drawn run rather than leaving it

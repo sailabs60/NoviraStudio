@@ -55,6 +55,7 @@ import { Curtain3D } from './Curtain3D';
 import { Tent3D } from './Tent3D';
 import { Truss3D } from './Truss3D';
 import { LedScreen3D } from './LedScreen3D';
+import { LedQuickPanel } from './LedQuickPanel';
 import { Booth3D } from './Booth3D';
 import { LightFixture3D } from './LightFixture3D';
 import { Constraint3D, ConstraintDrawPreview } from './Constraint3D';
@@ -353,9 +354,23 @@ function SceneNode({ object, selected }: { object: SceneObject; selected: boolea
       event.stopPropagation();
       const s = useEditor.getState();
       if (!s.selectedIds.includes(object.id)) s.select([object.id]);
+
+      /*
+       * A screen opens its own editor rather than framing.
+       *
+       * Content, curve and panel type are judged by looking at the wall, so
+       * the controls belong over the wall. Framing is still one keypress away
+       * on F, and every other object type keeps double-click meaning "go to
+       * this", which is the universal 3D convention.
+       */
+      if (object.type === 'led' && !s.readOnly) {
+        s.setLedQuickEditId(object.id);
+        return;
+      }
+
       s.requestFrameSelection();
     },
-    [object.id, tool]
+    [object.id, object.type, tool]
   );
 
   /**
@@ -1194,7 +1209,28 @@ export function currentCamera() {
 }
 
 function CameraReader({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
-  const { camera } = useThree();
+  const { camera, scene, invalidate: invalidateFrame } = useThree();
+
+  /*
+   * The live scene, reachable from the browser console in development.
+   *
+   * Geometry correctness is the one thing a screenshot cannot settle: a curved
+   * LED wall and a broken one look similar at a glance, and the question is
+   * whether the cabinets actually sit on the arc and whether the content mesh
+   * follows them. Reading the built world positions answers that directly.
+   *
+   * react-three-fiber stopped exposing its root on the canvas element, so this
+   * is the supported way in. Development only.
+   */
+  useEffect(() => {
+    if (!import.meta.env.DEV || typeof window === 'undefined') return;
+    (window as unknown as { __NOVIRA_THREE__?: unknown }).__NOVIRA_THREE__ = {
+      scene,
+      camera,
+      controls: orbitRef,
+      invalidate: invalidateFrame,
+    };
+  }, [scene, camera, orbitRef, invalidateFrame]);
 
   useEffect(() => {
     readCamera = () => {
@@ -2249,6 +2285,29 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
   );
 }
 
+/**
+ * Mounts the in-viewport LED editor when a screen has been double-clicked.
+ *
+ * A gate rather than logic inside the panel: the panel takes a screen and
+ * renders it, so it never has to reason about the object having been deleted
+ * or deselected underneath it.
+ */
+function LedQuickEditor() {
+  const id = useEditor((s) => s.ledQuickEditId);
+  const setId = useEditor((s) => s.setLedQuickEditId);
+  const screen = useEditor((s) =>
+    id ? (s.scene.objects.find((o) => o.id === id && o.type === 'led') as LedScreenSceneObject | undefined) : undefined
+  );
+
+  // The screen can go away while its editor is open — deleted, or undone.
+  useEffect(() => {
+    if (id && !screen) setId(null);
+  }, [id, screen, setId]);
+
+  if (!screen) return null;
+  return <LedQuickPanel screen={screen} onClose={() => setId(null)} />;
+}
+
 export function Viewport() {
   const orbitRef = useRef<any>(null);
   const pendingItem = useEditor((s) => s.pendingItem);
@@ -2264,6 +2323,7 @@ export function Viewport() {
         behind it.
       */}
       <SelectionToolbar />
+      <LedQuickEditor />
       <Canvas
         /*
          * `shadows` and the pixel ratio are decided before react-three-fiber
