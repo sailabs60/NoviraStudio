@@ -30,12 +30,41 @@ import { prisma } from '../lib/prisma.js';
 
 const UA = 'Novira/1.0';
 
+/**
+ * The model that reads a brief and lays out a room.
+ *
+ * `gpt-4o`, not `gpt-4o-mini`. This is the one job in the product where model
+ * capability shows up directly in the output: turning "a 200-guest awards
+ * dinner" into a room size, a table count, a stage position and a set of
+ * camera angles is spatial reasoning, and the mini model is measurably weaker
+ * at exactly that — it produces plausible prose and layouts that do not fit
+ * the room it just specified.
+ *
+ * Published evaluations put GPT-4o strongest on 2D layout and relative
+ * placement and weakest on 3D pose, which is why everything asked of it here
+ * is expressed as a plan: positions in millimetres on a floor, not
+ * orientations in space. That plays to what it is good at.
+ *
+ * Overridable so a deployment can trade cost for quality without a rebuild.
+ */
+const REASONING_MODEL = process.env.OPENAI_REASONING_MODEL ?? 'gpt-4o';
+
+/**
+ * The model that looks at photographs.
+ *
+ * Also `gpt-4o`: estimating a room's dimensions and spotting what is in it
+ * from a single photo is the same spatial problem as above, and the mini
+ * model's estimates were loose enough to need correcting by hand, which
+ * defeats the point of the feature.
+ */
+const VISION_MODEL = process.env.OPENAI_VISION_MODEL ?? 'gpt-4o';
+
 /* ── Text model ────────────────────────────────────────────────────────── */
 
 export const textModel = {
   status() {
     return env.ai.openaiApiKey
-      ? { available: true, name: 'OpenAI', model: 'gpt-4o-mini' }
+      ? { available: true, name: 'OpenAI', model: REASONING_MODEL }
       : { available: false, name: 'none', reason: 'No OPENAI_API_KEY configured. Prompts are read by the built-in parser instead.' };
   },
 
@@ -57,7 +86,7 @@ export const textModel = {
         'User-Agent': UA,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: REASONING_MODEL,
         temperature: 0.2,
         response_format: { type: 'json_object' },
         messages: [
@@ -85,7 +114,7 @@ export const textModel = {
 export const visionModel = {
   status() {
     return env.ai.openaiApiKey
-      ? { available: true, name: 'OpenAI', model: 'gpt-4o-mini' }
+      ? { available: true, name: 'OpenAI', model: VISION_MODEL }
       : { available: false, name: 'none', reason: 'No OPENAI_API_KEY configured. Photo analysis is unavailable.' };
   },
 
@@ -99,7 +128,7 @@ export const visionModel = {
         'User-Agent': UA,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: VISION_MODEL,
         temperature: 0.1,
         response_format: { type: 'json_object' },
         messages: [
