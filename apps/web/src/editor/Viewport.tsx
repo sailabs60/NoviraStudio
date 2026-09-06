@@ -807,16 +807,37 @@ function Ground() {
   );
 
   return (
-    <mesh
-      rotation={[-Math.PI / 2, 0, 0]}
-      receiveShadow
-      onClick={onClick}
-      onPointerMove={onPointerMove}
-      onContextMenu={onContextMenu}
-    >
-      <planeGeometry args={[400, 400]} />
-      <shadowMaterial opacity={0.22} />
-    </mesh>
+    <>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        receiveShadow
+        onClick={onClick}
+        onPointerMove={onPointerMove}
+        onContextMenu={onContextMenu}
+      >
+        <planeGeometry args={[400, 400]} />
+        <shadowMaterial opacity={0.22} />
+      </mesh>
+
+      {/*
+        The underside of the slab.
+
+        The interactive ground is a `shadowMaterial`, which is transparent by
+        design — it exists to catch shadows, not to be seen. That left the
+        floor see-through from below, so a camera that dipped under it looked
+        straight up into the room through the backs of everything, which reads
+        as a rendering fault rather than a view.
+
+        This is a second plane facing *down*, sitting a hair under the first.
+        `BackSide` means it is invisible from above and costs nothing in the
+        normal view; from beneath it is a solid floor. It never takes a
+        raycast, so it cannot steal a placement click from the ground.
+      */}
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, -0.002, 0]} raycast={() => null}>
+        <planeGeometry args={[400, 400]} />
+        <meshBasicMaterial color="#aeb6c2" side={THREE.FrontSide} />
+      </mesh>
+    </>
   );
 }
 
@@ -921,11 +942,18 @@ function SelectionGizmo({ orbitRef }: { orbitRef: React.MutableRefObject<any> })
         }}
         onMouseUp={() => {
           if (orbitRef.current) orbitRef.current.enabled = true;
-          // Write the gizmo's result back into the document in millimetres.
+          /*
+           * Write the gizmo's result back into the document in millimetres.
+           *
+           * Y is floored at zero: the grid is the ground, and nothing in a
+           * real room is buried in the slab. Without this the move gizmo will
+           * happily drag a table down through the floor, where it is both
+           * invisible and still counted in the schedule.
+           */
           updateObject(object.id, {
             positionMm: {
               x: worldToMm(node.position.x),
-              y: worldToMm(node.position.y),
+              y: Math.max(0, worldToMm(node.position.y)),
               z: worldToMm(node.position.z),
             },
             rotationDeg: {
@@ -1338,6 +1366,54 @@ const WHEEL_ZOOM_SCALE = 0.0016;
  * orbits and frames around. Moving the camera without moving the target is
  * what makes a view slowly start rotating about a point behind you.
  */
+/*
+ * The floor is solid.
+ *
+ * In a real room you cannot get your eye under the ground, you cannot see the
+ * underside of the slab, and you cannot put a chair inside it. The viewport
+ * should behave the same way, and three separate routes were letting it break:
+ * orbiting is limited by `maxPolarAngle`, but *panning* moves the camera and
+ * its target together and *flying* moves the camera outright, so both could
+ * end up below zero — at which point the room is seen from underneath through
+ * the back of the floor, which reads as a rendering fault rather than a view.
+ *
+ * Clamping every frame rather than per gesture is deliberate: it is one rule
+ * in one place that holds no matter which input moved the camera, including
+ * ones added later.
+ */
+const EYE_FLOOR_M = 0.05;
+/** The orbit target may sit on the floor but never beneath it. */
+const TARGET_FLOOR_M = 0;
+
+function GroundClamp({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
+  const { camera } = useThree();
+
+  useFrame(() => {
+    let corrected = false;
+
+    if (camera.position.y < EYE_FLOOR_M) {
+      camera.position.y = EYE_FLOOR_M;
+      corrected = true;
+    }
+
+    const controls = orbitRef.current;
+    if (controls?.target && controls.target.y < TARGET_FLOOR_M) {
+      controls.target.y = TARGET_FLOOR_M;
+      corrected = true;
+    }
+
+    if (corrected) {
+      // `update()` re-derives the spherical coordinates from the corrected
+      // positions; without it the controls keep their own stale idea of where
+      // the camera is and snap it back below ground on the next input.
+      controls?.update?.();
+      invalidate();
+    }
+  });
+
+  return null;
+}
+
 function TrackpadNavigation({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
   const { camera, gl, size } = useThree();
   // Once a device proves it is a trackpad it stays one: a slow, careful
@@ -2105,6 +2181,7 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
       <FlyNavigation orbitRef={orbitRef} />
       <BoxSelect orbitRef={orbitRef} />
       <TrackpadNavigation orbitRef={orbitRef} />
+      <GroundClamp orbitRef={orbitRef} />
       <SelectionAnchor />
 
       {objects

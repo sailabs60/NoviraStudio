@@ -312,6 +312,16 @@ export interface LedScreenSceneObject extends BaseSceneObject {
   /** Image shown on the screen, and the flat colour behind it. */
   contentUrl?: string | null;
   contentColor: string;
+  /**
+   * How the image is mapped onto a wall of a different aspect ratio.
+   *
+   * The same three choices any video processor offers: `cover` fills the wall
+   * and crops the overflow, `contain` fits the whole image and leaves the rest
+   * of the wall dark, `stretch` distorts to fit. `cover` is the default
+   * because it is what a content operator does when the wall is close to the
+   * source aspect, which it usually is.
+   */
+  contentFit?: 'cover' | 'contain' | 'stretch';
   /** How strongly the screen lights the room around it. */
   glowIntensity: number;
   /** Screen brightness as a fraction of the panel's rated nits. */

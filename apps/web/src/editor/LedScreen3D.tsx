@@ -37,35 +37,62 @@ export function LedScreen3D({ screen, selected }: Props) {
   const totalH = cabinetH * screen.rows;
 
   /*
-   * Faceting. The whole wall subtends `curveDeg`, so each column is rotated by
-   * a share of it and pushed out along the resulting radius. Radius is derived
-   * from the chord rather than picked, so the ends of a curved wall land where
-   * they would if it were actually built.
+   * Faceting — how a curved LED wall is actually built.
+   *
+   * The cabinets are rigid. A curve is made by hanging them at a fixed
+   * cabinet-to-cabinet angle so the wall approximates an arc, which is why the
+   * geometry has to be laid out *along the arc* rather than across a chord.
+   * The whole wall subtends `curveDeg`, so each of the N cabinets turns by
+   * `curveDeg / N` from its neighbour and the arc length equals the wall's
+   * real width — a 5 m wall is 5 m of cabinets whether it is curved or not.
+   *
+   * The previous version derived the radius from the chord and then placed
+   * cabinets at `sin(angle) * radius`, which is the chord position. That made
+   * the cabinets cover only ~81% of the wall's width at 60°, so they bunched up
+   * and overlapped, and the ends never reached where the wall was meant to end.
+   *
+   * Sign convention: a positive angle curves the wall *towards* the viewer at
+   * the ends (concave, wrapping the audience), which is the common event case.
+   * `panelAngle` is exported to the content mesh so the image bends on exactly
+   * the same arc rather than floating in front of the panels.
    */
-  const curve = Math.max(-90, Math.min(90, screen.curveDeg || 0));
+  const curve = Math.max(-180, Math.min(180, screen.curveDeg || 0));
+  const curved = Math.abs(curve) >= 0.5;
+
+  const arc = useMemo(() => {
+    const total = (curve * Math.PI) / 180;
+    // Arc length is the wall width, so radius follows from r = s / theta.
+    const radius = curved ? totalW / Math.abs(total) : 0;
+    const perPanel = total / screen.columns;
+    return { total, radius, perPanel };
+  }, [curve, curved, totalW, screen.columns]);
+
   const columns = useMemo(() => {
     const list: Array<{ x: number; z: number; rotY: number }> = [];
-    if (Math.abs(curve) < 0.5) {
+    if (!curved) {
       for (let c = 0; c < screen.columns; c += 1) {
         list.push({ x: -totalW / 2 + cabinetW * (c + 0.5), z: 0, rotY: 0 });
       }
       return list;
     }
 
-    const radians = (curve * Math.PI) / 180;
-    const radius = totalW / (2 * Math.sin(radians / 2));
+    const { radius, perPanel } = arc;
+    const sign = Math.sign(curve) || 1;
     for (let c = 0; c < screen.columns; c += 1) {
-      const t = (c + 0.5) / screen.columns - 0.5;
-      const angle = radians * t;
+      // Angle of this cabinet's centre, measured from the wall's centre.
+      const angle = perPanel * (c + 0.5 - screen.columns / 2);
       list.push({
-        x: Math.sin(angle) * radius,
-        // Pull the arc back so the wall's centre stays on the object origin.
-        z: radius * (1 - Math.cos(angle)) * Math.sign(radius),
+        // Position on the arc itself. `radius * sin` is the along-wall
+        // distance and `radius * (1 - cos)` the depth, so the centre cabinet
+        // stays on the origin and the ends sweep back symmetrically.
+        x: radius * Math.sin(angle),
+        z: sign * radius * (1 - Math.cos(angle)),
+        // Each cabinet faces along the arc normal at its own position.
         rotY: -angle,
       });
     }
     return list;
-  }, [curve, screen.columns, totalW, cabinetW]);
+  }, [curved, arc, curve, screen.columns, totalW, cabinetW]);
 
   const emissiveColor = selected ? '#7c83f5' : screen.contentColor || '#0b1220';
   const glow = Math.max(0, Math.min(3, screen.glowIntensity ?? 0.6)) * (screen.brightness ?? 0.8);
@@ -108,7 +135,10 @@ export function LedScreen3D({ screen, selected }: Props) {
           widthM={totalW}
           heightM={totalH}
           glow={glow}
-          curved={Math.abs(curve) >= 0.5}
+          curved={curved}
+          radius={arc.radius}
+          arcRad={arc.total}
+          fit={screen.contentFit ?? 'cover'}
         />
       ) : null}
 
@@ -204,12 +234,21 @@ function ScreenContent({
   heightM,
   glow,
   curved,
+  radius,
+  arcRad,
+  fit,
 }: {
   url: string;
   widthM: number;
   heightM: number;
   glow: number;
   curved: boolean;
+  /** Radius of the wall's arc, in world units. Zero when flat. */
+  radius: number;
+  /** Total angle the wall subtends, in radians. Signed. */
+  arcRad: number;
+  /** How the image is mapped onto a wall of a different aspect ratio. */
+  fit: 'cover' | 'contain' | 'stretch';
 }) {
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
 
@@ -254,17 +293,100 @@ function ScreenContent({
     };
   }, [url]);
 
+  /*
+   * The image surface.
+   *
+   * A flat, subdivided plane was the bug: subdividing a plane adds vertices
+   * but does not move them, so on a curved wall the image stayed dead flat
+   * while the cabinets swept away behind it — the picture appeared to hang in
+   * front of the screen and slide sideways as the curve increased.
+   *
+   * This builds the surface on the wall's own arc, so every vertex sits on the
+   * cabinets. It is a cylinder wall rather than a plane, opened to exactly the
+   * wall's angle, with UVs laid straight across it so the picture reads left to
+   * right along the curve as it does on a real wall.
+   */
+  const geometry = useMemo(() => {
+    const w = widthM * 0.985;
+    const h = heightM * 0.985;
+    if (!curved || radius <= 0 || Math.abs(arcRad) < 1e-4) {
+      return new THREE.PlaneGeometry(w, h, 1, 1);
+    }
+
+    const segments = Math.max(8, Math.min(96, Math.ceil(Math.abs(arcRad) / 0.05)));
+    const sign = Math.sign(arcRad) || 1;
+    const geo = new THREE.PlaneGeometry(w, h, segments, 1);
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+
+    for (let i = 0; i < pos.count; i += 1) {
+      // Where this vertex sits across the wall, -0.5 .. 0.5.
+      const t = pos.getX(i) / w;
+      const angle = arcRad * t;
+      pos.setX(i, radius * Math.sin(angle));
+      // Matches the cabinet placement exactly, so the image lies on the panels
+      // rather than in front of or behind them.
+      pos.setZ(i, sign * radius * (1 - Math.cos(angle)));
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    return geo;
+  }, [curved, radius, arcRad, widthM, heightM]);
+
+  // Geometry is built here, so it is this component's job to release it.
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  /*
+   * Aspect handling. A 16:9 image on a 3:1 wall has to do something, and the
+   * three options are the ones any video system offers: fill and crop, letter-
+   * box, or distort. `repeat`/`offset` crop in texture space, which costs
+   * nothing and leaves the geometry alone.
+   */
+  useEffect(() => {
+    if (!texture) return;
+    const image = texture.image as { width?: number; height?: number } | undefined;
+    const iw = image?.width ?? 1;
+    const ih = image?.height ?? 1;
+    if (!iw || !ih || fit === 'stretch') {
+      texture.repeat.set(1, 1);
+      texture.offset.set(0, 0);
+    } else {
+      const wallAspect = widthM / Math.max(0.0001, heightM);
+      const imageAspect = iw / ih;
+      const wider = imageAspect > wallAspect;
+      const crop = fit === 'cover' ? wider : !wider;
+      if (crop) {
+        const r = wallAspect / imageAspect;
+        texture.repeat.set(r, 1);
+        texture.offset.set((1 - r) / 2, 0);
+      } else {
+        const r = imageAspect / wallAspect;
+        texture.repeat.set(1, r);
+        texture.offset.set(0, (1 - r) / 2);
+      }
+    }
+    // 'contain' letterboxes, so the areas outside the image must not smear the
+    // edge pixels across the rest of the wall.
+    texture.wrapS = fit === 'contain' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+    texture.wrapT = texture.wrapS;
+    texture.needsUpdate = true;
+    invalidate();
+  }, [texture, fit, widthM, heightM]);
+
   if (!texture) return null;
 
   return (
-    <mesh position={[0, heightM / 2, 0.006]} userData={{ part: 'screen-content' }}>
-      <planeGeometry args={[widthM * 0.985, heightM * 0.985, curved ? 24 : 1, 1]} />
+    <mesh
+      position={[0, heightM / 2, 0.006]}
+      geometry={geometry}
+      userData={{ part: 'screen-content' }}
+    >
       <meshStandardMaterial
         map={texture}
         emissiveMap={texture}
         emissive="#ffffff"
         emissiveIntensity={Math.max(0.35, glow)}
         toneMapped={false}
+        side={THREE.DoubleSide}
       />
     </mesh>
   );

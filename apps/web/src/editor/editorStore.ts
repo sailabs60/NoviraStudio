@@ -325,6 +325,25 @@ interface EditorState {
 
 const clone = <T,>(value: T): T => structuredClone(value);
 
+/**
+ * Keep an object on or above the floor.
+ *
+ * The grid is the ground, and in a real room nothing is buried in the slab —
+ * you cannot see it, you cannot reach it, and a schedule that counts it is
+ * wrong. Objects reached negative Y from several directions: the move gizmo,
+ * a typed value in the properties panel, and imported models whose own origin
+ * sits at their centre rather than their base.
+ *
+ * Applying it here means every write goes through one rule, rather than each
+ * caller remembering. A patch that does not touch position is passed straight
+ * through untouched, so this costs nothing on the common path.
+ */
+function keepAboveGround<T extends Partial<SceneObject>>(patch: T): T {
+  const position = (patch as { positionMm?: { x: number; y: number; z: number } }).positionMm;
+  if (!position || position.y >= 0) return patch;
+  return { ...patch, positionMm: { ...position, y: 0 } };
+}
+
 export const useEditor = create<EditorState>((set, get) => ({
   planId: null,
   title: '',
@@ -611,7 +630,8 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   addObjects: (objects) => {
     get().commit((draft) => {
-      draft.objects.push(...objects);
+      // Dropped and imported objects land on the floor, never through it.
+      draft.objects.push(...objects.map((o) => keepAboveGround(o) as SceneObject));
     });
     set((s) => ({
       selectedIds: objects.map((o) => o.id),
@@ -623,14 +643,16 @@ export const useEditor = create<EditorState>((set, get) => ({
   updateObject: (id, patch) =>
     get().commit((draft) => {
       const index = draft.objects.findIndex((o) => o.id === id);
-      if (index >= 0) draft.objects[index] = { ...draft.objects[index]!, ...patch } as SceneObject;
+      const safe = keepAboveGround(patch);
+      if (index >= 0) draft.objects[index] = { ...draft.objects[index]!, ...safe } as SceneObject;
     }),
 
   updateObjects: (ids, patch) =>
     get().commit((draft) => {
+      const safe = keepAboveGround(patch);
       for (const id of ids) {
         const index = draft.objects.findIndex((o) => o.id === id);
-        if (index >= 0) draft.objects[index] = { ...draft.objects[index]!, ...patch } as SceneObject;
+        if (index >= 0) draft.objects[index] = { ...draft.objects[index]!, ...safe } as SceneObject;
       }
     }),
 
