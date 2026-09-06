@@ -103,11 +103,28 @@ export const imageEnhance = {
    * whole value is that the render shows *this* plan, not a plausible event.
    */
   buildPrompt(userPrompt: string | undefined): string {
-    const base =
-      'Photorealistic architectural visualisation of this event layout. ' +
-      'Preserve the exact camera angle, room geometry, object positions and proportions. ' +
-      'Improve only materials, lighting and realism. Do not add, remove or move any object.';
-    return userPrompt?.trim() ? `${base} ${userPrompt.trim()}` : base;
+    /*
+     * Written as an edit instruction, not a description of a scene.
+     *
+     * A text-to-image model reads a prompt as "make me this". An image editor
+     * reads it as "do this to what I gave you", and the difference decides
+     * whether the render is the user's room or a stock ballroom. Every clause
+     * here refers to *this image* and every constraint is stated as something
+     * not to change, because the failure people notice is an object moving or
+     * appearing, not a material being slightly off.
+     */
+    const base = [
+      'Re-render THIS EXACT IMAGE as a photorealistic architectural photograph.',
+      'This is a 3D layout of a real event. Keep it identical in structure:',
+      'the same camera angle and framing, the same room shape and proportions,',
+      'every object in exactly the same position, at the same size and rotation,',
+      'and the same number of every item. Do not add furniture, people, plants,',
+      'signage or decoration that is not already in the image. Do not remove or',
+      'move anything. Do not change the layout.',
+      'Improve only surface realism: material texture, reflections, shadow',
+      'softness, light falloff and overall photographic quality.',
+    ].join(' ');
+    return userPrompt?.trim() ? `${base} Art direction: ${userPrompt.trim()}` : base;
   },
 
   async enhance(
@@ -193,21 +210,65 @@ export interface EnhanceProgress {
   stage: string;
 }
 
+/**
+ * Put a data URL somewhere the provider can fetch it.
+ *
+ * Image-to-image endpoints take *links*, not base64 — they fetch the source
+ * themselves — so a frame read off the canvas has to exist at a public address
+ * before it can be edited. Returns an absolute URL, because "somewhere the
+ * provider can reach" is the whole requirement and a relative path is not that.
+ */
+async function hostImage(imageDataUrl: string, subdir: string): Promise<string> {
+  const match = /^data:image\/(\w+);base64,(.+)$/s.exec(imageDataUrl);
+  if (!match) {
+    // Already a link: nothing to host.
+    if (/^https?:\/\//i.test(imageDataUrl)) return imageDataUrl;
+    throw ApiError.badRequest('The canvas image could not be read.');
+  }
+
+  const extension = match[1] === 'jpeg' ? 'jpg' : match[1]!;
+  const saved = await saveAssetBuffer(
+    Buffer.from(match[2]!, 'base64'),
+    `${subdir}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`
+  );
+
+  const base = (process.env.PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
+  if (saved.url.startsWith('http')) return saved.url;
+  if (!base) {
+    throw new ApiError(
+      500,
+      'NO_PUBLIC_URL',
+      'PUBLIC_BASE_URL is not set, so the renderer cannot fetch the frame.'
+    );
+  }
+  return `${base}${saved.url}`;
+}
+
 async function enhanceWithNanoBanana(
   imageDataUrl: string,
   prompt: string,
   onProgress?: (progress: EnhanceProgress) => void
 ) {
-  const create = await nanoFetch(`${NANO_BASE}/api/v2/generate`, {
+  /*
+   * `/api/edit`, not `/api/v2/generate`.
+   *
+   * This is the bug behind "AI Enhance invents a completely different room".
+   * `/api/v2/generate` is text-to-image: it accepts an `image` field, answers
+   * 200, and then ignores it entirely — so the render came from the prompt
+   * alone and had nothing to do with the plan on screen. `/api/edit` is the
+   * image-to-image pipeline; verified against the live API, it returns the
+   * *same* subject re-rendered photorealistically.
+   *
+   * The edit endpoint fetches the source itself and refuses data URLs, so the
+   * canvas frame has to be written somewhere public first. That is what
+   * `hostImage` does, and it is the reason this cannot simply post base64.
+   */
+  onProgress?.({ percent: 8, stage: 'Preparing the frame' });
+  const sourceUrl = await hostImage(imageDataUrl, 'renders/source');
+
+  const create = await nanoFetch(`${NANO_BASE}/api/edit`, {
     method: 'POST',
-    body: JSON.stringify({
-      prompt,
-      image: imageDataUrl,
-      aspect_ratio: '16:9',
-      size: '2K',
-      format: 'png',
-      samples: 1,
-    }),
+    body: JSON.stringify({ prompt, images: [sourceUrl] }),
   });
 
   const started = (await create.json().catch(() => ({}))) as {
@@ -229,20 +290,38 @@ async function enhanceWithNanoBanana(
     await new Promise((r) => setTimeout(r, 3000));
     ticks += 1;
 
+    // The v1 edit pipeline reports on `/api/status`, not the v2 path.
     const check = await nanoFetch(
-      `${NANO_BASE}/api/v2/status?task_id=${encodeURIComponent(taskId)}`
+      `${NANO_BASE}/api/status?task_id=${encodeURIComponent(taskId)}`
     );
     const payload = (await check.json().catch(() => ({}))) as {
       code?: number;
-      data?: { status?: string; status_code?: number; response?: unknown; error_message?: string | null };
+      data?: {
+        // v2 reports a string, v1 a number. Both are handled below.
+        status?: string | number;
+        status_code?: number;
+        response?: unknown;
+        error_message?: string | null;
+      };
     };
 
     // A transient non-200 is not a failure; the provider rate-limits and
     // occasionally answers 5xx mid-task. Only an explicit FAILED is fatal.
     const data = payload.data ?? {};
+    /*
+     * The two pipelines report differently and both have to be read.
+     *
+     * v2 (text-to-image) sets `status` to the string 'IN_PROGRESS' | 'SUCCESS'
+     * | 'FAILED'. v1 (the edit endpoint this uses) sets it to a *number*: 3
+     * while running, 1 on success, -1 on failure. Checking only the string
+     * form meant a finished edit was never recognised and the job ran to its
+     * timeout — which is exactly how "did not finish in time" appeared on a
+     * render the provider had completed in under a minute.
+     */
     const state = String(data.status ?? '').toUpperCase();
+    const code = typeof data.status === 'number' ? data.status : data.status_code;
 
-    if (state === 'SUCCESS' || data.status_code === 1) {
+    if (state === 'SUCCESS' || code === 1) {
       const image = nanoImageUrl(data.response);
       if (image) {
         onProgress?.({ percent: 90, stage: 'Saving the render' });
@@ -253,12 +332,24 @@ async function enhanceWithNanoBanana(
       throw new ApiError(502, 'PROVIDER_ERROR', 'The renderer finished without returning an image.');
     }
 
-    if (state === 'FAILED' || state === 'ERROR' || data.status_code === -1) {
-      throw new ApiError(
-        502,
-        'PROVIDER_ERROR',
-        data.error_message || 'The image service could not produce a render.'
-      );
+    /*
+     * Anything that is not "running" and not "done" is a failure.
+     *
+     * v1 uses `2` for a task it has given up on — most often because it could
+     * not fetch the source image, which is what happens when PUBLIC_BASE_URL
+     * points somewhere the provider cannot reach, such as localhost. Treating
+     * only -1 as failure meant those tasks were polled until the deadline and
+     * then reported as a timeout, which sent everyone looking in the wrong
+     * place. Naming it is the difference between a five-minute wait and a
+     * sentence that says what to fix.
+     */
+    if (state === 'FAILED' || state === 'ERROR' || code === -1 || code === 2) {
+      const detail =
+        code === 2
+          ? 'The renderer could not read the frame. If this is a local server, ' +
+            'PUBLIC_BASE_URL must be an address the provider can reach.'
+          : data.error_message || 'The image service could not produce a render.';
+      throw new ApiError(502, 'PROVIDER_ERROR', detail);
     }
 
     /*
