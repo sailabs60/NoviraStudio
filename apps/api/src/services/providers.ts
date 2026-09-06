@@ -112,22 +112,94 @@ export const imageEnhance = {
 
   async enhance(
     imageDataUrl: string,
-    prompt: string
+    prompt: string,
+    onProgress?: (progress: EnhanceProgress) => void
   ): Promise<{ url: string; provider: string; model: string }> {
-    if (env.ai.nanobananaApiKey) return enhanceWithNanoBanana(imageDataUrl, prompt);
+    if (env.ai.nanobananaApiKey) return enhanceWithNanoBanana(imageDataUrl, prompt, onProgress);
     if (env.ai.openaiApiKey) return enhanceWithOpenAi(imageDataUrl, prompt);
     throw new ApiError(503, 'PROVIDER_UNAVAILABLE', 'AI Enhance is not configured on this server.');
   },
 };
 
-async function enhanceWithNanoBanana(imageDataUrl: string, prompt: string) {
-  const create = await fetch('https://nanobnana.com/api/v2/generate', {
+/**
+ * Enhance a canvas image through Nano Banana.
+ *
+ * Two things about this provider have to be right or the job hangs rather than
+ * fails, which is far worse:
+ *
+ *  · **The poll endpoint is `/api/v2/status?task_id=`.** This used to call
+ *    `/api/v2/task/{id}`, which does not exist and answers 404 with an HTML
+ *    error body. The loop looked for an `images` array that would never
+ *    appear and for a `failed` state that would never be set, so it span
+ *    silently for its whole deadline and the user watched 15% for three
+ *    minutes. Verified against the live API: the status document is
+ *    `{code:200, data:{status:'IN_PROGRESS'|'SUCCESS'|'FAILED', response:
+ *    '["https://…png"]'}}`.
+ *  · **`response` is a JSON *string*, not an array.** It arrives as
+ *    `"[\"https://…\"]"`, so it has to be parsed before the URL can be read.
+ *
+ * Every request also carries a timeout. `fetch` has none by default, so a
+ * provider that accepts a connection and never answers holds the job open
+ * indefinitely — the difference between "this failed, here are your credits"
+ * and "this is stuck forever", which is the whole complaint.
+ */
+const NANO_BASE = 'https://nanobnana.com';
+const NANO_REQUEST_TIMEOUT_MS = 45_000;
+const NANO_DEADLINE_MS = 5 * 60_000;
+
+async function nanoFetch(url: string, init: RequestInit = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NANO_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${env.ai.nanobananaApiKey}`,
+        'User-Agent': UA,
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Read the image URL out of a status document, whatever shape it arrives in. */
+function nanoImageUrl(response: unknown): string | null {
+  if (!response) return null;
+  if (Array.isArray(response)) return typeof response[0] === 'string' ? response[0] : null;
+  if (typeof response === 'string') {
+    const text = response.trim();
+    if (/^https?:\/\//i.test(text)) return text;
+    try {
+      const parsed = JSON.parse(text);
+      return Array.isArray(parsed) && typeof parsed[0] === 'string' ? parsed[0] : null;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof response === 'object') {
+    const images = (response as { images?: unknown }).images;
+    if (Array.isArray(images) && typeof images[0] === 'string') return images[0];
+  }
+  return null;
+}
+
+export interface EnhanceProgress {
+  /** 0-100, as reported by the provider or inferred from elapsed time. */
+  percent: number;
+  stage: string;
+}
+
+async function enhanceWithNanoBanana(
+  imageDataUrl: string,
+  prompt: string,
+  onProgress?: (progress: EnhanceProgress) => void
+) {
+  const create = await nanoFetch(`${NANO_BASE}/api/v2/generate`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.ai.nanobananaApiKey}`,
-      'Content-Type': 'application/json',
-      'User-Agent': UA,
-    },
     body: JSON.stringify({
       prompt,
       image: imageDataUrl,
@@ -138,32 +210,74 @@ async function enhanceWithNanoBanana(imageDataUrl: string, prompt: string) {
     }),
   });
 
-  const started = (await create.json()) as { code?: number; data?: { task_id?: string }; message?: string };
-  if (started.code !== 200 || !started.data?.task_id) {
+  const started = (await create.json().catch(() => ({}))) as {
+    code?: number;
+    data?: { task_id?: string };
+    task_id?: string;
+    message?: string;
+  };
+  const taskId = started.data?.task_id ?? started.task_id;
+  if (started.code !== 200 || !taskId) {
     throw new ApiError(502, 'PROVIDER_ERROR', started.message ?? 'The image service rejected the request.');
   }
 
-  // Poll for the result; the provider is asynchronous.
-  const deadline = Date.now() + 180_000;
+  onProgress?.({ percent: 20, stage: 'Sent to the renderer' });
+
+  const deadline = Date.now() + NANO_DEADLINE_MS;
+  let ticks = 0;
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 4000));
-    const check = await fetch(`https://nanobnana.com/api/v2/task/${started.data.task_id}`, {
-      headers: { Authorization: `Bearer ${env.ai.nanobananaApiKey}`, 'User-Agent': UA },
-    });
-    const status = (await check.json()) as {
-      data?: { state?: string; status?: string; images?: string[]; result?: { images?: string[] } };
+    await new Promise((r) => setTimeout(r, 3000));
+    ticks += 1;
+
+    const check = await nanoFetch(
+      `${NANO_BASE}/api/v2/status?task_id=${encodeURIComponent(taskId)}`
+    );
+    const payload = (await check.json().catch(() => ({}))) as {
+      code?: number;
+      data?: { status?: string; status_code?: number; response?: unknown; error_message?: string | null };
     };
-    const state = status.data?.state ?? status.data?.status;
-    const images = status.data?.images ?? status.data?.result?.images;
-    if (images?.length) {
-      const url = await mirror(images[0]!, 'renders');
-      return { url, provider: 'nanobanana', model: 'nanobanana-v2' };
+
+    // A transient non-200 is not a failure; the provider rate-limits and
+    // occasionally answers 5xx mid-task. Only an explicit FAILED is fatal.
+    const data = payload.data ?? {};
+    const state = String(data.status ?? '').toUpperCase();
+
+    if (state === 'SUCCESS' || data.status_code === 1) {
+      const image = nanoImageUrl(data.response);
+      if (image) {
+        onProgress?.({ percent: 90, stage: 'Saving the render' });
+        const url = await mirror(image, 'renders');
+        return { url, provider: 'nanobanana', model: 'nanobanana-v2' };
+      }
+      // SUCCESS with nothing to show is a provider fault, not a wait.
+      throw new ApiError(502, 'PROVIDER_ERROR', 'The renderer finished without returning an image.');
     }
-    if (state === 'failed' || state === 'error') {
-      throw new ApiError(502, 'PROVIDER_ERROR', 'The image service could not produce a render.');
+
+    if (state === 'FAILED' || state === 'ERROR' || data.status_code === -1) {
+      throw new ApiError(
+        502,
+        'PROVIDER_ERROR',
+        data.error_message || 'The image service could not produce a render.'
+      );
     }
+
+    /*
+     * The provider reports no percentage, so this is an honest estimate from
+     * elapsed time rather than a number invented to look busy: it approaches
+     * but never reaches the hand-off point, so it cannot claim to be finished
+     * before the image exists.
+     */
+    const elapsed = ticks * 3000;
+    const expected = 45_000;
+    const percent = 20 + Math.round(65 * (1 - Math.exp(-elapsed / expected)));
+    onProgress?.({ percent, stage: 'Rendering' });
   }
-  throw new ApiError(504, 'PROVIDER_TIMEOUT', 'The render took too long. Try again.');
+
+  throw new ApiError(
+    504,
+    'PROVIDER_TIMEOUT',
+    'The renderer did not finish in time. Your credits have been returned.'
+  );
 }
 
 async function enhanceWithOpenAi(imageDataUrl: string, prompt: string) {

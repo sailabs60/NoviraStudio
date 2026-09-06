@@ -467,18 +467,22 @@ registerHandler('ai_text_to_3d', async (ctx) => {
   };
 });
 
-registerHandler('ai_image_to_3d', async (ctx) => {
-  const input = ctx.input as { imageUrl: string };
-
-  await ctx.report(12);
-  const taskId = await meshGen.fromImage(input.imageUrl);
-
-  const finished = await waitFor(ctx, () => meshGen.poll(taskId));
-  await ctx.report(94);
-
-  const stored = await adopt(finished, 'generated/models');
-  return { modelUrl: stored.url, thumbnailUrl: stored.thumbnailUrl, providerTaskId: taskId };
-});
+/*
+ * `ai_image_to_3d` is deliberately *not* registered here.
+ *
+ * It used to be, alongside a second registration in `routes/ai.ts`, and
+ * because the handler map is keyed by feature the later import silently
+ * replaced the earlier one. The studio's version read `imageUrl` while the
+ * editor's route sent `imageDataUrl`, so whichever route lost the race fed
+ * its input to a handler that could not read it and failed in a way that
+ * looked like the provider being down.
+ *
+ * The surviving handler lives in `routes/ai.ts` because it does strictly
+ * more: it mirrors the mesh, inspects it and reports real-world dimensions,
+ * which the catalogue needs before an item can be saved. It accepts either
+ * input shape, so this route's requests are served by it unchanged.
+ * `registerHandler` now throws on a collision so this cannot recur silently.
+ */
 
 registerHandler('ai_mockup', async (ctx) => {
   const input = ctx.input as {

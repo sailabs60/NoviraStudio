@@ -41,6 +41,21 @@ export type JobHandler = (ctx: JobContext) => Promise<Record<string, unknown>>;
 const handlers = new Map<FeatureCode, JobHandler>();
 
 export function registerHandler(feature: FeatureCode, handler: JobHandler) {
+  /*
+   * Two modules registering the same feature is a bug, not a configuration.
+   *
+   * `ai_image_to_3d` was registered in both `ai.ts` and `aiStudio.ts`, and
+   * because this is a Map the later import silently won — so one of the two
+   * HTTP routes fed its input to a handler that read a different field name,
+   * got `undefined`, and failed in a way that looked like the provider was
+   * down. A collision is now refused outright rather than resolved by import
+   * order, which is not a decision anybody made.
+   */
+  if (handlers.has(feature)) {
+    throw new Error(
+      `Two handlers registered for "${feature}". Only one module may own a feature.`
+    );
+  }
   handlers.set(feature, handler);
 }
 

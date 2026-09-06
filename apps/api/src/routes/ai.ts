@@ -28,7 +28,24 @@ registerHandler('ai_enhance', async (ctx) => {
   await ctx.report(15);
 
   const prompt = imageEnhance.buildPrompt(ctx.input.prompt as string | undefined);
-  const result = await imageEnhance.enhance(imageDataUrl, prompt);
+
+  /*
+   * Progress comes from the provider loop rather than being invented here.
+   *
+   * The old version reported 15 and then sat inside a single await until the
+   * whole thing finished, so the bar was frozen for the entire render — which
+   * is indistinguishable from a hang, and is exactly what it was mistaken
+   * for. Reporting is throttled to whole-number changes so a long render does
+   * not write to the database every three seconds for no visible gain.
+   */
+  let lastReported = 15;
+  const result = await imageEnhance.enhance(imageDataUrl, prompt, (progress) => {
+    const next = Math.round(progress.percent);
+    if (next > lastReported) {
+      lastReported = next;
+      void ctx.report(next);
+    }
+  });
   await ctx.report(90);
 
   // Record it against the plan so the AI Renders panel can show a history.
@@ -48,14 +65,27 @@ registerHandler('ai_enhance', async (ctx) => {
   return { imageUrl: result.url, provider: result.provider, model: result.model, prompt };
 });
 
-/** Image to 3D: a photograph becomes a catalogue-ready mesh. */
+/**
+ * Image to 3D: a photograph becomes a catalogue-ready mesh.
+ *
+ * Serves both callers. The editor's Photo-to-3D sends a base64 `imageDataUrl`
+ * read straight off the canvas; the studio sends a hosted `imageUrl`. They
+ * were once two separate registrations of this same feature, which meant one
+ * of them was always dead — see the note in `aiStudio.ts`.
+ */
 registerHandler('ai_image_to_3d', async (ctx) => {
   const imageDataUrl = String(ctx.input.imageDataUrl ?? '');
-  if (!imageDataUrl.startsWith('data:image/')) {
+  const imageUrl = String(ctx.input.imageUrl ?? '');
+  const source = imageDataUrl.startsWith('data:image/')
+    ? imageDataUrl
+    : /^https?:\/\//.test(imageUrl)
+      ? imageUrl
+      : '';
+  if (!source) {
     throw ApiError.badRequest('Upload a JPG, PNG or WebP image first.');
   }
 
-  const taskId = await imageTo3d.start(imageDataUrl, { pbr: Boolean(ctx.input.pbr) });
+  const taskId = await imageTo3d.start(source, { pbr: Boolean(ctx.input.pbr) });
   await ctx.report(10);
 
   const deadline = Date.now() + 10 * 60_000;
