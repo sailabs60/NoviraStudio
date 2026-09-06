@@ -9,6 +9,7 @@ import {
 } from '@novira/shared';
 import { assets } from '../lib/assetsApi';
 import { MaterialSwatch } from './MaterialLibrary';
+import { partsOfObject } from './picking';
 import { useEditor } from './editorStore';
 import { useSelectedObjects } from './selectors';
 import { LazyImage } from '../components/LazyImage';
@@ -38,9 +39,12 @@ type QuickAction = 'material' | 'art';
 
 export function ObjectQuickActions({
   action,
+  flipped = false,
   onClose,
 }: {
   action: QuickAction;
+  /** The toolbar is below the selection, so the window opens downward too. */
+  flipped?: boolean;
   onClose: () => void;
 }) {
   /*
@@ -66,7 +70,11 @@ export function ObjectQuickActions({
     <>
       {/* Click anywhere else to dismiss. */}
       <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
-      <div className="pointer-events-auto absolute left-1/2 top-14 z-30 w-[340px] -translate-x-1/2">
+      <div
+        className={`pointer-events-auto absolute left-1/2 z-30 w-[340px] -translate-x-1/2 ${
+          flipped ? 'top-full mt-1.5' : 'bottom-full mb-1.5'
+        }`}
+      >
         <div className="panel overflow-hidden p-0 shadow-xl">
           {action === 'material' ? <MaterialQuickPick onClose={onClose} /> : <ArtQuickPick onClose={onClose} />}
         </div>
@@ -95,6 +103,8 @@ function MaterialQuickPick({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState('');
   const selected = useSelectedObjects();
   const clearAllFinishes = useEditor((s) => s.clearAllFinishes);
+  const finishTarget = useEditor((s) => s.finishTarget);
+  const setFinishTarget = useEditor((s) => s.setFinishTarget);
 
   const materials = useMemo(
     () => (search.trim() ? searchMaterials(search) : BUILT_IN_MATERIALS).slice(0, 36),
@@ -103,17 +113,86 @@ function MaterialQuickPick({ onClose }: { onClose: () => void }) {
 
   const applied = selected.filter((o) => Object.keys(o.finishes ?? {}).length).length;
 
+  /*
+   * The parts of the object, when exactly one is selected.
+   *
+   * A chair is a frame and a seat pad; a stage is deck, skirt and guardrail.
+   * Painting all of it one colour is the common case and stays the default —
+   * but "change the material on this part" is the request that sends people
+   * hunting through the Finish rail, so the parts are right here.
+   *
+   * Read after a beat: the model may still be loading when the selection
+   * changes, and asking the scene graph for parts before the glTF has landed
+   * answers "no parts" rather than "not yet".
+   */
+  const only = selected.length === 1 ? selected[0]! : null;
+  const [parts, setParts] = useState<Array<{ part: string; label: string }>>([]);
+
+  useEffect(() => {
+    if (!only) {
+      setParts([]);
+      return;
+    }
+    let cancelled = false;
+    let timer = 0;
+    const read = () => {
+      if (cancelled) return;
+      const found = partsOfObject(only.id);
+      setParts(found);
+      if (!found.length) timer = window.setTimeout(read, 400);
+    };
+    read();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [only]);
+
+  // A part aimed at an object nobody has selected any more is how a click
+  // ends up painting something off-screen.
+  useEffect(() => {
+    if (finishTarget && !selected.some((o) => o.id === finishTarget.objectId)) setFinishTarget(null);
+  }, [selected, finishTarget, setFinishTarget]);
+
+  const aimedPart = finishTarget && only && finishTarget.objectId === only.id ? finishTarget.part : '*';
+
   return (
     <>
       <PopoverHeader
         title="Material"
         hint={
-          selected.length === 1
-            ? 'Click a finish to apply it to this object.'
-            : `Click a finish to apply it to all ${selected.length} selected.`
+          selected.length > 1
+            ? `Click a finish to apply it to all ${selected.length} selected.`
+            : aimedPart === '*'
+              ? 'Click a finish to apply it to the whole object.'
+              : 'Click a finish to apply it to that part alone.'
         }
         onClose={onClose}
       />
+
+      {only && parts.length ? (
+        <div className="border-b border-line px-3 py-2">
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-ink-subtle">Apply to</p>
+          <div className="flex flex-wrap gap-1">
+            {[{ part: '*', label: 'Whole object' }, ...parts.filter((p) => p.part !== '*')].map((row) => {
+              const active = aimedPart === row.part;
+              const painted = Boolean(only.finishes?.[row.part]);
+              return (
+                <button
+                  key={row.part}
+                  type="button"
+                  onClick={() => setFinishTarget(row.part === '*' ? null : { objectId: only.id, part: row.part })}
+                  className={`chip transition ${active ? 'chip-active' : 'hover:border-line-strong'}`}
+                  title={painted ? `${row.label} — has its own finish` : row.label}
+                >
+                  {painted ? <span className="mr-1 h-1.5 w-1.5 rounded-full bg-success" aria-hidden /> : null}
+                  {row.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="px-3 pt-2">
         <div className="relative">

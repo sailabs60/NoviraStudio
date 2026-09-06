@@ -601,6 +601,14 @@ function useKeyboardShortcuts(
         s.duplicateSelected();
         return;
       }
+      // Select everything placed. Constraints describe the building rather
+      // than the design, so they stay out of it, and so does anything hidden
+      // — selecting what you cannot see is how a stray nudge goes unnoticed.
+      if (mod && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        s.select(s.scene.objects.filter((o) => o.type !== 'constraint' && !o.hidden).map((o) => o.id));
+        return;
+      }
       // Panel visibility: the two keys that turn the studio into a clean frame.
       if (mod && e.key === '\\') {
         e.preventDefault();
@@ -704,7 +712,10 @@ function useKeyboardShortcuts(
           s.setCameraMode('perspective');
           break;
         case 'f':
-          s.requestFrameAll();
+          // Frame the selection when there is one, everything when there is
+          // not — the same key doing the thing you meant either way, which is
+          // how every other 3D tool binds it.
+          s.requestFrameSelection();
           break;
         case 'l':
           s.toggleLockSelected();

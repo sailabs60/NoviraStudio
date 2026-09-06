@@ -166,6 +166,19 @@ interface EditorState {
   boxSelectRect: { x0: number; y0: number; x1: number; y1: number } | null;
   setBoxSelectRect: (rect: { x0: number; y0: number; x1: number; y1: number } | null) => void;
 
+  /**
+   * Where the selection is on screen, in canvas pixels, so the quick toolbar
+   * can sit beside it.
+   *
+   * `x` is the horizontal centre of the selection and `top`/`bottom` are the
+   * edges of its projected bounding box — enough for the toolbar to place
+   * itself clear of the object rather than over it, and to flip underneath
+   * when there is no room above. Computed inside the Canvas, where the camera
+   * is; consumed outside it, where the HTML is.
+   */
+  selectionAnchor: { x: number; top: number; bottom: number } | null;
+  setSelectionAnchor: (anchor: { x: number; top: number; bottom: number } | null) => void;
+
   setTool: (tool: Tool) => void;
   setTransformMode: (mode: TransformMode) => void;
   setCameraMode: (mode: 'perspective' | 'top') => void;
@@ -199,6 +212,16 @@ interface EditorState {
   cameraTouched: boolean;
   markCameraTouched: () => void;
   requestFrameAll: () => void;
+  /**
+   * Frame just what is selected, rather than the whole plan.
+   *
+   * The move people make constantly in every 3D tool — pick a thing, press a
+   * key, arrive at it — and the one that makes a large plan navigable at all,
+   * because framing everything from across a 40 m hall puts you back where
+   * you started.
+   */
+  requestFrameSelection: () => void;
+  frameMode: 'all' | 'selection';
 
   /**
    * Held-right-click fly navigation is active.
@@ -466,6 +489,9 @@ export const useEditor = create<EditorState>((set, get) => ({
   boxSelectRect: null,
   setBoxSelectRect: (boxSelectRect) => set({ boxSelectRect }),
 
+  selectionAnchor: null,
+  setSelectionAnchor: (selectionAnchor) => set({ selectionAnchor }),
+
   setTool: (tool) => {
     // Leaving a drawing tool abandons a half-drawn run rather than leaving it
     // floating with no way to finish it.
@@ -478,7 +504,15 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   setFinishTarget: (finishTarget) => set({ finishTarget }),
 
-  requestFrameAll: () => set((s) => ({ frameRequest: s.frameRequest + 1 })),
+  frameMode: 'all',
+  requestFrameAll: () => set((s) => ({ frameRequest: s.frameRequest + 1, frameMode: 'all' })),
+  requestFrameSelection: () =>
+    set((s) => ({
+      frameRequest: s.frameRequest + 1,
+      // Nothing selected is a request to see everything, not a request to
+      // fly to the origin and look at nothing.
+      frameMode: s.selectedIds.length ? 'selection' : 'all',
+    })),
 
   markCameraTouched: () => {
     if (!get().cameraTouched) set({ cameraTouched: true });

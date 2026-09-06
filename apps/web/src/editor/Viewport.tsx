@@ -341,6 +341,24 @@ function SceneNode({ object, selected }: { object: SceneObject; selected: boolea
   );
 
   /**
+   * Double-click to go to it.
+   *
+   * The other half of framing: F frames what is already selected, and this
+   * selects and frames in one gesture — which is what a double-click means in
+   * every 3D tool, and the fastest way across a large plan.
+   */
+  const onDoubleClick = useCallback(
+    (event: ThreeEvent<MouseEvent>) => {
+      if (tool === 'draw' || tool === 'wall') return;
+      event.stopPropagation();
+      const s = useEditor.getState();
+      if (!s.selectedIds.includes(object.id)) s.select([object.id]);
+      s.requestFrameSelection();
+    },
+    [object.id, tool]
+  );
+
+  /**
    * Right-press to push this object around the floor.
    *
    * The gesture people reach for constantly, and the one the gizmo is worst
@@ -387,6 +405,7 @@ function SceneNode({ object, selected }: { object: SceneObject; selected: boolea
       rotation={[rotation.x * DEG, rotation.y * DEG, rotation.z * DEG]}
       scale={[scale.x, scale.y, scale.z]}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       onPointerDown={onPointerDown}
     >
       {object.type === 'catalog' || object.type === 'opening' ? (
@@ -1398,6 +1417,88 @@ function FlyNavigation({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
   return null;
 }
 
+/**
+ * Publish where the selection is on screen, so the quick toolbar can sit
+ * beside it instead of over it.
+ *
+ * The projected bounding box of the selected meshes, not the object's origin:
+ * a toolbar placed at a table's centre is a toolbar in the middle of the
+ * table. The box's top edge is what the toolbar hangs off, which is why it is
+ * measured rather than guessed.
+ *
+ * Measured on a frame tick and only published when it has actually moved by a
+ * pixel or two — this runs while somebody is orbiting, and pushing an
+ * unchanged value into the store on every frame would re-render the whole
+ * editor for nothing.
+ */
+function SelectionAnchor() {
+  const { scene, camera, size } = useThree();
+  const selectedIds = useEditorShallow((s) => s.selectedIds);
+  const setSelectionAnchor = useEditor((s) => s.setSelectionAnchor);
+  const last = useRef<{ x: number; top: number; bottom: number } | null>(null);
+
+  useEffect(() => {
+    if (!selectedIds.length) {
+      last.current = null;
+      setSelectionAnchor(null);
+    }
+  }, [selectedIds, setSelectionAnchor]);
+
+  useFrame(() => {
+    if (!selectedIds.length) return;
+    const wanted = new Set(selectedIds);
+
+    const box = new THREE.Box3();
+    scene.traverse((node) => {
+      if (!(node instanceof THREE.Mesh)) return;
+      let owner: THREE.Object3D | null = node;
+      while (owner && !owner.userData?.objectId) owner = owner.parent;
+      if (!owner || !wanted.has(String(owner.userData.objectId))) return;
+      box.expandByObject(node);
+    });
+    if (box.isEmpty()) return;
+
+    // Project all eight corners: a box that is behind the camera on one
+    // corner and in front on another has no single sensible screen point,
+    // and taking only the centre would put the toolbar over tall objects.
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    const corner = new THREE.Vector3();
+    for (let i = 0; i < 8; i += 1) {
+      corner.set(
+        i & 1 ? box.max.x : box.min.x,
+        i & 2 ? box.max.y : box.min.y,
+        i & 4 ? box.max.z : box.min.z
+      );
+      corner.project(camera);
+      if (corner.z > 1) return; // behind the camera — no honest position
+      const sx = (corner.x * 0.5 + 0.5) * size.width;
+      const sy = (-corner.y * 0.5 + 0.5) * size.height;
+      minX = Math.min(minX, sx);
+      maxX = Math.max(maxX, sx);
+      minY = Math.min(minY, sy);
+      maxY = Math.max(maxY, sy);
+    }
+
+    const next = { x: Math.round((minX + maxX) / 2), top: Math.round(minY), bottom: Math.round(maxY) };
+    const previous = last.current;
+    if (
+      previous &&
+      Math.abs(previous.x - next.x) < 2 &&
+      Math.abs(previous.top - next.top) < 2 &&
+      Math.abs(previous.bottom - next.bottom) < 2
+    ) {
+      return;
+    }
+    last.current = next;
+    setSelectionAnchor(next);
+  });
+
+  return null;
+}
+
 const BOX_SELECT_THRESHOLD_PX = 4;
 
 /**
@@ -1741,6 +1842,7 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
       <WalkthroughCamera orbitRef={orbitRef} />
       <FlyNavigation orbitRef={orbitRef} />
       <BoxSelect orbitRef={orbitRef} />
+      <SelectionAnchor />
 
       {objects
         .filter((object) => showConstraints || object.type !== 'constraint')
@@ -1763,9 +1865,40 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
         makeDefault
         enableDamping
         dampingFactor={0.08}
+        /*
+         * Zoom toward the cursor, not toward the middle of the screen.
+         *
+         * This is the single biggest difference between a viewport that feels
+         * accurate and one that feels like wrestling. Zooming to the centre
+         * means every approach to a corner of the plan is zoom, pan, zoom,
+         * pan; zooming to the cursor means you point at the thing and arrive
+         * at it. Every CAD and 3D tool worth using does this.
+         */
+        zoomToCursor
+        /*
+         * Pan on the screen plane rather than along the ground.
+         *
+         * Dragging up should move the view up, whatever angle the camera is
+         * at. Ground-plane panning sends the view sliding away into the
+         * distance the moment the camera is anywhere near level.
+         */
+        screenSpacePanning
+        /*
+         * Middle-drag pans. It used to be the right button's job, and the
+         * right button now flies — so without this there would be no pan
+         * gesture left at all, which is not an acceptable trade for the fly
+         * navigation.
+         */
+        mouseButtons={{
+          LEFT: THREE.MOUSE.ROTATE,
+          MIDDLE: THREE.MOUSE.PAN,
+          RIGHT: THREE.MOUSE.PAN,
+        }}
+        /* One finger orbits, two pan and pinch — the phone convention. */
+        touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
         maxPolarAngle={cameraMode === 'top' ? 0.001 : Math.PI / 2.05}
-        minDistance={1}
-        maxDistance={200}
+        minDistance={0.4}
+        maxDistance={400}
         onStart={() => useEditor.getState().markCameraTouched()}
         onEnd={() => {
           const cam = currentCamera();
@@ -1854,20 +1987,64 @@ export function Viewport() {
  * toolbar is a separate row below the canvas rather than an overlay on it, so
  * nothing here competes with either.
  */
+const NAV_KEYS: Array<[string, string]> = [
+  ['Drag', 'Orbit'],
+  ['Middle-drag', 'Pan'],
+  ['Scroll', 'Zoom to the cursor'],
+  ['Right-drag', 'Fly — WASD, Q/E, Shift to go faster'],
+  ['Double-click', 'Go to that object'],
+  ['F', 'Frame the selection'],
+  ['Ctrl-drag', 'Box-select'],
+  ['Ctrl+A', 'Select everything'],
+  ['Numpad 7/1/3', 'Top, front, side — Ctrl for the opposite'],
+  ['Numpad 4/6/8/2', 'Orbit a step at a time'],
+  ['Numpad +/−', 'Zoom · Numpad 0 frames everything'],
+];
+
+/**
+ * The navigation scheme, for anyone who has not found it yet.
+ *
+ * A chip rather than a sentence: the full map is eleven lines, which is a
+ * wall of text to leave permanently over someone's plan, and one line is not
+ * enough to be worth reading. So it sits closed, says the one thing worth
+ * knowing, and opens on hover for the rest.
+ *
+ * Bottom-left, because the gizmo compass owns bottom-right and the bottom
+ * toolbar is a row below the canvas rather than an overlay on it.
+ */
 function NavHint() {
   const flying = useEditor((s) => s.flying);
+
+  if (flying) {
+    return (
+      <div className="pointer-events-none absolute bottom-3 left-3">
+        <div className="rounded-full border border-primary/40 bg-primary/15 px-2.5 py-1 text-[10px] font-medium text-primary backdrop-blur">
+          Flying — WASD move · Q/E down and up · mouse look · Shift boost
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="pointer-events-none absolute bottom-3 left-3">
-      <div
-        className={`rounded-full border px-2.5 py-1 text-[10px] font-medium backdrop-blur transition-colors ${
-          flying
-            ? 'border-primary/40 bg-primary/15 text-primary'
-            : 'border-line/70 bg-surface/70 text-ink-subtle'
-        }`}
-      >
-        {flying
-          ? 'Flying — WASD move · mouse look · Shift boost'
-          : 'Right-click + WASD to fly · Ctrl-drag to box-select · Numpad for views'}
+    <div className="group absolute bottom-3 left-3">
+      <div className="rounded-full border border-line/70 bg-surface/70 px-2.5 py-1 text-[10px] font-medium text-ink-subtle backdrop-blur transition group-hover:border-line group-hover:text-ink-muted">
+        Drag to orbit · scroll to zoom · <span className="font-semibold">more ways to move</span>
+      </div>
+
+      <div className="pointer-events-none absolute bottom-full left-0 mb-1.5 hidden w-[290px] group-hover:block">
+        <div className="panel p-2 shadow-xl">
+          <p className="mb-1.5 px-1 text-[10px] font-bold uppercase tracking-[0.08em] text-ink-subtle">
+            Moving around
+          </p>
+          <dl className="space-y-0.5">
+            {NAV_KEYS.map(([key, what]) => (
+              <div key={key} className="flex items-baseline gap-2 rounded px-1 py-0.5">
+                <dt className="w-[104px] shrink-0 text-[10px] font-semibold text-ink">{key}</dt>
+                <dd className="text-[10px] leading-snug text-ink-subtle">{what}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
       </div>
     </div>
   );
@@ -1980,6 +2157,9 @@ function FrameAll({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
     if (!controls) return;
     pending.current = 0;
 
+    const state = useEditor.getState();
+    const wanted = state.frameMode === 'selection' ? new Set(state.selectedIds) : null;
+
     const box = new THREE.Box3();
     scene.traverse((node) => {
       if (!(node instanceof THREE.Mesh)) return;
@@ -1988,6 +2168,8 @@ function FrameAll({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
       let owner: THREE.Object3D | null = node;
       while (owner && !owner.userData?.objectId) owner = owner.parent;
       if (!owner) return;
+      // Framing a selection measures only what is selected.
+      if (wanted && !wanted.has(String(owner.userData.objectId))) return;
       box.expandByObject(node);
     });
     if (box.isEmpty()) return;
@@ -2001,11 +2183,25 @@ function FrameAll({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
     // A little past the exact fit, so the subject is not jammed to the edges.
     const distance = (radius / Math.sin(fov / 2)) * 1.4;
 
-    const direction = new THREE.Vector3(0.75, 0.6, 1).normalize();
+    /*
+     * Framing everything picks the hero three-quarter angle; framing a
+     * selection keeps the angle you are already looking from. Snapping the
+     * view around every time somebody focuses a chair is disorienting — the
+     * request was "get closer to this", not "show me this from somewhere
+     * else".
+     */
+    const keepAngle = wanted && camera.position.distanceTo(controls.target) > 0.001;
+    const direction = keepAngle
+      ? camera.position.clone().sub(controls.target).normalize()
+      : new THREE.Vector3(0.75, 0.6, 1).normalize();
+
     controls.target.copy(centre);
     camera.position.copy(centre.clone().add(direction.multiplyScalar(distance)));
     camera.updateProjectionMatrix();
     controls.update();
+    // Remember where framing left the camera, like any other move.
+    const cam = currentCamera();
+    if (cam) useEditor.getState().setCameraPose(cam);
   });
 
   return null;
