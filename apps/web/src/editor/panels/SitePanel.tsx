@@ -126,7 +126,26 @@ export function SitePanel() {
         {venues?.items.length ? (
           <div className="space-y-1">
             {venues.items.slice(0, 6).map((venue) => (
-              <div key={venue.id} className="rounded-lg border border-line bg-surface-muted/40 p-2">
+              <div key={venue.id} className="overflow-hidden rounded-lg border border-line bg-surface-muted/40">
+                {/*
+                  The photograph of the room.
+                  
+                  A venue is a place, and a place is recognised by looking at
+                  it — a list of names and dimensions makes every ballroom in a
+                  hotel look identical, which is exactly the case where someone
+                  has to choose between them. Only drawn when there is one, so
+                  a record without a photo is a compact row rather than a card
+                  with a grey hole in it.
+                */}
+                {venue.previewUrl ? (
+                  <img
+                    src={venue.previewUrl}
+                    alt=""
+                    loading="lazy"
+                    className="h-24 w-full border-b border-line object-cover"
+                  />
+                ) : null}
+                <div className="p-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="truncate text-[11px] font-semibold text-ink">{venue.name}</p>
@@ -157,6 +176,7 @@ export function SitePanel() {
                 >
                   {applying === venue.id ? 'Applying…' : 'Use this venue'}
                 </button>
+                </div>
               </div>
             ))}
           </div>

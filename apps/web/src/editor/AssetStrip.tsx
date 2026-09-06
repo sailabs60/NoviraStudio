@@ -271,7 +271,22 @@ function HallShelf() {
             className="flex w-[188px] shrink-0 flex-col justify-between rounded-lg border border-line bg-surface p-2.5 transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-card"
           >
             <span>
-              <Building2 className="h-4 w-4 text-primary" />
+              {/*
+                The room itself, when there is a photo of it. A venue is a
+                place, and a card that shows only its name makes every
+                ballroom in the same hotel look identical — which is exactly
+                the moment someone is choosing between them.
+              */}
+              {venue.previewUrl ? (
+                <img
+                  src={venue.previewUrl}
+                  alt=""
+                  loading="lazy"
+                  className="mb-1.5 h-16 w-full rounded border border-line object-cover"
+                />
+              ) : (
+                <Building2 className="h-4 w-4 text-primary" />
+              )}
               <span className="mt-1.5 block truncate text-[11px] font-semibold text-ink">{venue.name}</span>
               <span className="block truncate text-[9px] text-ink-subtle">
                 {venue.city}

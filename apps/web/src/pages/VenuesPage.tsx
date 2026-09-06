@@ -12,6 +12,7 @@ import {
   Trash2,
   Upload,
   Truck,
+  X,
   Zap,
 } from 'lucide-react';
 import {
@@ -30,6 +31,8 @@ import { PageBanner } from '../components/PageBanner';
 import { spatial } from '../lib/spatialApi';
 import { Modal } from '../components/Modal';
 import { VenueImportDialog } from './VenueImportDialog';
+import { ImagePicker, type PickedImage } from '../components/ImagePicker';
+import { http, ApiClientError } from '../lib/api';
 import {
   CardSkeletons,
   EmptyState,
@@ -403,6 +406,44 @@ function VenueEditor({ spec, onClose }: { spec: VenueSpec; onClose: () => void }
   });
 
   const set = <K extends keyof VenueSpec>(key: K, value: VenueSpec[K]) => setDraft((d) => ({ ...d, [key]: value }));
+  const [pickingPhoto, setPickingPhoto] = useState(false);
+  const [savingPhoto, setSavingPhoto] = useState(false);
+
+  /**
+   * Adopt a chosen photograph onto our own host.
+   *
+   * An upload arrives as a data URL and a library pick as a remote link; both
+   * end as a file we serve, so the card keeps working when the source moves
+   * and the image is not blocked by a hotlink rule.
+   */
+  async function adoptPhoto(image: PickedImage) {
+    setSavingPhoto(true);
+    try {
+      if (image.url.startsWith('data:')) {
+        const blob = await (await fetch(image.url)).blob();
+        const form = new FormData();
+        form.append('file', new File([blob], image.name || 'venue', { type: blob.type }));
+        const { data } = await http.post<{ url: string }>('/branding/images/upload', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        set('previewUrl', data.url);
+      } else {
+        const { data } = await http.post<{ imageUrl: string }>('/branding/images/import', {
+          url: image.url,
+          title: image.name,
+          ...(image.sourceUrl ? { sourceUrl: image.sourceUrl } : {}),
+          ...(image.sourceLabel ? { provider: image.sourceLabel } : {}),
+        });
+        set('previewUrl', data.imageUrl);
+      }
+    } catch (error: unknown) {
+      toast('error', error instanceof ApiClientError ? error.message : 'That photograph could not be saved.');
+    } finally {
+      setSavingPhoto(false);
+      setPickingPhoto(false);
+    }
+  }
+
   const setStructure = (patch: Partial<VenueSpec['structure']>) =>
     setDraft((d) => ({ ...d, structure: { ...d.structure, ...patch } }));
   const setAccess = (patch: Partial<VenueSpec['access']>) => setDraft((d) => ({ ...d, access: { ...d.access, ...patch } }));
@@ -449,6 +490,61 @@ function VenueEditor({ spec, onClose }: { spec: VenueSpec; onClose: () => void }
       <div className="max-h-[55vh] overflow-y-auto pr-1">
         {tab === 'basics' ? (
           <>
+            {/*
+              The photograph, first.
+
+              A venue library is browsed by eye. Every ballroom in a hotel has
+              a similar name and similar dimensions, and the thing that tells
+              them apart on a card is what the room looks like — so this is at
+              the top of the form rather than buried under forty fields, and
+              it is the first thing the cards render.
+            */}
+            <Field
+              label="Photograph"
+              hint="Shown on the venue card. A wide shot of the empty room reads best."
+            >
+              <div className="flex items-start gap-3">
+                {draft.previewUrl ? (
+                  <div className="relative shrink-0">
+                    <img
+                      src={draft.previewUrl}
+                      alt=""
+                      className="h-20 w-32 rounded border border-line object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => set('previewUrl', null)}
+                      title="Remove the photograph"
+                      className="absolute right-1 top-1 rounded bg-black/60 p-1 text-white hover:bg-black/80"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex h-20 w-32 shrink-0 items-center justify-center rounded border border-dashed border-line text-[10px] text-ink-subtle">
+                    No photograph
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm w-full"
+                    onClick={() => setPickingPhoto(true)}
+                    disabled={savingPhoto}
+                  >
+                    {savingPhoto
+                      ? 'Bringing it in…'
+                      : draft.previewUrl
+                        ? 'Change the photograph'
+                        : 'Add a photograph'}
+                  </button>
+                  <p className="mt-1 text-[10px] leading-snug text-ink-subtle">
+                    Upload one, or pick from the image libraries.
+                  </p>
+                </div>
+              </div>
+            </Field>
+
             <Field label="Space name" hint="What the venue calls this room — “Grand Ballroom”, “Hall 3”.">
               <TextInput value={draft.name} onChange={(e) => set('name', e.target.value)} />
             </Field>
@@ -771,6 +867,17 @@ function VenueEditor({ spec, onClose }: { spec: VenueSpec; onClose: () => void }
           </>
         ) : null}
       </div>
+
+      {pickingPhoto ? (
+        <ImagePicker
+          open
+          onClose={() => setPickingPhoto(false)}
+          onPick={(image) => void adoptPhoto(image)}
+          title="Photograph of the venue"
+          description="A wide shot of the empty room reads best on the card."
+          initialQuery={[draft.buildingName, draft.name, 'ballroom interior'].filter(Boolean).join(' ')}
+        />
+      ) : null}
     </Modal>
   );
 }
