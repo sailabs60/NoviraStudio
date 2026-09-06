@@ -376,6 +376,26 @@ const RECOMMENDED_FALLBACK_QUERIES = {
 const LIST_CACHE = new Map();
 const LIST_CACHE_TTL_MS = 10 * 60 * 1000;
 const LIST_CACHE_MAX_KEYS = 200;
+/*
+ * The cache is bounded by rows, not just by keys.
+ *
+ * A key ceiling alone is not a memory bound, because the entries are wildly
+ * uneven: a narrow shelf holds a few hundred rows, while the broad warm-up
+ * queries hold 3204 models, 2756 materials and 1480 HDRIs in a single entry.
+ * Measured against live data an asset row is about 1.2 kB of JSON, so 200 keys
+ * of that size is well over half a gigabyte of resident objects — more than
+ * the container has, which is how the API ends up being killed and restarted
+ * rather than failing any request.
+ *
+ * 60k rows is roughly 150-200 MB in memory, which leaves comfortable headroom
+ * on a 512 MB instance while still holding every shelf the warmer fills plus
+ * the queries people actually run.
+ */
+const LIST_CACHE_MAX_ROWS = Math.max(
+    5_000,
+    parseInt(process.env.ASSET_CACHE_MAX_ROWS, 10) || 60_000
+);
+let listCacheRows = 0;
 const SOURCE_TIMEOUT_MS = Math.max(1000, parseInt(process.env.ASSET_SOURCE_TIMEOUT_MS, 10) || 12000);
 /** Image providers fan out to many HTTP pages; the default 12s cap caused Openverse/Pexels to time out before returning rows. */
 const SOURCE_TIMEOUT_IMAGES_MS = Math.max(
@@ -389,17 +409,26 @@ function listCacheKey(category, query) {
     return `${ver}::${category}::${query.trim().toLowerCase()}`;
 }
 
+/** Drop one entry, keeping the running row count in step. */
+function dropCached(key) {
+    const entry = LIST_CACHE.get(key);
+    if (!entry) return;
+    listCacheRows -= Array.isArray(entry.ranked) ? entry.ranked.length : 0;
+    if (listCacheRows < 0) listCacheRows = 0;
+    LIST_CACHE.delete(key);
+}
+
 function getCachedRanked(key) {
     const entry = LIST_CACHE.get(key);
     if (entry && Date.now() - entry.ts < LIST_CACHE_TTL_MS) {
         if (!Array.isArray(entry.ranked) || entry.ranked.length === 0) {
-            LIST_CACHE.delete(key);
+            dropCached(key);
             return null;
         }
         console.log(`[AssetRegistry] Ranked cache HIT "${key}" (${entry.ranked.length} rows)`);
         return entry.ranked;
     }
-    if (entry) LIST_CACHE.delete(key);
+    if (entry) dropCached(key);
     return null;
 }
 
@@ -411,10 +440,39 @@ function setCachedRanked(key, ranked) {
         console.warn(`[AssetRegistry] Skipping cache write for "${key}" — result is empty (transient failure guard).`);
         return;
     }
+    /*
+     * Refuse a single entry larger than the whole budget.
+     *
+     * Eviction can never bring such an entry back under the cap, because it
+     * is exempt from its own sweep — so it would sit resident and blow the
+     * budget on its own. Serving it uncached costs one re-rank on the next
+     * request; keeping it costs the process.
+     */
+    if (ranked.length > LIST_CACHE_MAX_ROWS) {
+        console.warn(
+            `[AssetRegistry] Not caching "${key}" — ${ranked.length} rows exceeds the ${LIST_CACHE_MAX_ROWS}-row budget.`
+        );
+        return;
+    }
+
+    dropCached(key);
     LIST_CACHE.set(key, { ranked, ts: Date.now() });
-    if (LIST_CACHE.size > LIST_CACHE_MAX_KEYS) {
-        const oldest = [...LIST_CACHE.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
-        if (oldest) LIST_CACHE.delete(oldest[0]);
+    listCacheRows += ranked.length;
+
+    /*
+     * Evict oldest-first until both bounds hold. Sorting once and walking the
+     * list beats re-sorting per eviction, which matters because a single
+     * oversized entry can require dropping several older ones.
+     */
+    if (LIST_CACHE.size > LIST_CACHE_MAX_KEYS || listCacheRows > LIST_CACHE_MAX_ROWS) {
+        const byAge = [...LIST_CACHE.entries()].sort((a, b) => a[1].ts - b[1].ts);
+        for (const [oldKey] of byAge) {
+            if (LIST_CACHE.size <= LIST_CACHE_MAX_KEYS && listCacheRows <= LIST_CACHE_MAX_ROWS) break;
+            // Never evict what we just wrote: doing so would make a large
+            // result permanently uncacheable and re-fetched on every request.
+            if (oldKey === key) continue;
+            dropCached(oldKey);
+        }
     }
 }
 

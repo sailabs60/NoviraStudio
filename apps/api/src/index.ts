@@ -97,11 +97,24 @@ app.get('/api/health', async (_req, res) => {
   } catch {
     database = 'down';
   }
+  /*
+   * Memory is reported because this service has been OOM-killed in
+   * production, and a crash loop with no memory figure anywhere is very hard
+   * to tell apart from an application error. `rss` is what the container's
+   * limit is actually enforced against, so it is the number that matters.
+   */
+  const mem = process.memoryUsage();
   res.json({
     ok: database === 'up',
     service: 'novira-api',
     database,
     latencyMs: Date.now() - started,
+    uptimeSec: Math.round(process.uptime()),
+    memory: {
+      rssMb: Math.round(mem.rss / 1e6),
+      heapUsedMb: Math.round(mem.heapUsed / 1e6),
+      heapTotalMb: Math.round(mem.heapTotal / 1e6),
+    },
     time: new Date().toISOString(),
   });
 });
