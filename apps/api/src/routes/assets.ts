@@ -117,6 +117,7 @@ const resolveBody = z.object({
   source: z.string().min(1).max(40),
   sourceAssetId: z.string().min(1).max(200),
   modelUrl: z.string().url().max(2048).nullish(),
+  downloadApiUrl: z.string().url().max(2048).nullish(),
   viewerUrl: z.string().url().max(1024).nullish(),
 });
 

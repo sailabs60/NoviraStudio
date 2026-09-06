@@ -35,6 +35,18 @@ function isApplicableInEditor(asset) {
         }
         return Boolean(asset.loadableInScene || asset.modelUrl);
     }
+    /*
+     * An image is usable when there is an image to use.
+     *
+     * No image provider sets `loadableInScene` — the flag exists for models
+     * and environments — so falling through to it filtered out every single
+     * photograph whenever the "usable only" filter was on, which is the
+     * default the asset drawer opens with. The drawer showed an empty
+     * Images tab while the providers were returning hundreds of rows.
+     */
+    if (type === 'image') {
+        return Boolean(asset.imageUrl || asset.thumbnailUrl);
+    }
     return Boolean(asset.loadableInScene);
 }
 

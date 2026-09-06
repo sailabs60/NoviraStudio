@@ -22,6 +22,8 @@ export interface ProviderAsset {
   thumbnailUrl?: string | null;
   viewerUrl?: string | null;
   modelUrl?: string | null;
+  /** Provider endpoint the server exchanges for a signed download URL. */
+  downloadApiUrl?: string | null;
   hdriUrl?: string | null;
   materialMaps?: Record<string, string | null> | null;
   imageUrl?: string | null;
@@ -111,11 +113,19 @@ export const assets = {
     return data;
   },
 
-  resolve: async (asset: Pick<ProviderAsset, 'source' | 'sourceAssetId' | 'modelUrl' | 'viewerUrl'>): Promise<ResolvedAsset> => {
+  resolve: async (
+    asset: Pick<
+      ProviderAsset,
+      'source' | 'sourceAssetId' | 'modelUrl' | 'downloadApiUrl' | 'viewerUrl'
+    >
+  ): Promise<ResolvedAsset> => {
     const { data } = await http.post<ResolvedAsset>('/assets/resolve', {
       source: asset.source,
       sourceAssetId: asset.sourceAssetId,
       modelUrl: asset.modelUrl ?? null,
+      // Without this a BlenderKit row falls back to a search by id, which is
+      // both slower and how these stopped resolving in the first place.
+      downloadApiUrl: asset.downloadApiUrl ?? null,
       viewerUrl: asset.viewerUrl ?? null,
     });
     return data;

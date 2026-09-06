@@ -38,8 +38,18 @@ const normalize = (item) => {
     const tags = asArray(item?.tags).map(t => (typeof t === 'string' ? t : t?.name)).filter(Boolean);
     const categories = asArray(item?.categories).map(c => (typeof c === 'string' ? c : c?.name)).filter(Boolean);
 
-    // Sketchfab search reports download eligibility; final download can still 403 per account.
-    const sketchfabDownloadable = Boolean(item?.isDownloadable);
+    /*
+     * Sketchfab's `isDownloadable` means "an account may download this", not
+     * "this server can". Without a configured token every one of those rows
+     * resolves to an external link, so reporting them as loadable puts models
+     * in the drawer that cannot be dragged into the scene — the single most
+     * common way this library disappoints someone.
+     *
+     * The rows still appear for browsing; they are simply honest about
+     * needing an account, and the `usable` filter can now exclude them.
+     */
+    const sketchfabDownloadable =
+        Boolean(item?.isDownloadable) && Boolean((process.env.SKETCHFAB_API_TOKEN || '').trim());
     return {
         assetType: 'model',
         source: 'sketchfab',

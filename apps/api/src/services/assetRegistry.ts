@@ -49,6 +49,16 @@ export interface ProviderAsset {
   viewerUrl?: string | null;
   /** A glTF/GLB the viewport can load directly. Null when only browsable. */
   modelUrl?: string | null;
+  /**
+   * A provider endpoint that mints a real download URL when asked.
+   *
+   * Distinct from `modelUrl`, which is the file itself. Some libraries —
+   * BlenderKit is the one that matters here — publish a stable per-file
+   * endpoint that has to be exchanged for a short-lived signed CDN link.
+   * Carrying it on the row means resolving is a single call at drop time
+   * rather than a fresh search followed by a second call.
+   */
+  downloadApiUrl?: string | null;
   /** An equirectangular HDR/EXR for image-based lighting. */
   hdriUrl?: string | null;
   /** PBR maps, keyed by channel: colour, normal, roughness, metalness, ao… */

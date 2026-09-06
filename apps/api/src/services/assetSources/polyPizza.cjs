@@ -41,8 +41,28 @@ const safeFetchJson = async (url, options = {}, timeoutMs = TIMEOUT_MS) => {
     }
 };
 
+/**
+ * The GLB that belongs to a public search row.
+ *
+ * Poly Pizza's public search does not publish a download URL, and its official
+ * API wants a key — but every model is served from the same CDN under the same
+ * uuid as its preview image, only with a `.glb` extension instead of `.webp`.
+ * Deriving it turns the whole Poly Pizza shelf from browse-only into something
+ * that actually drops into the scene, with no key and no account.
+ *
+ * Everything here is CC0 or CC-BY, so re-serving the bytes is within licence;
+ * the row keeps its `licence` field either way so attribution survives.
+ */
+function publicGlbFromPreview(previewUrl) {
+    const raw = String(previewUrl || '').trim();
+    if (!raw) return null;
+    const m = raw.match(/^https:\/\/static\.poly\.pizza\/([0-9a-f-]{36})\.(?:webp|png|jpg|jpeg)$/i);
+    return m ? `https://static.poly.pizza/${m[1]}.glb` : null;
+}
+
 /** Legacy public JSON shape from https://poly.pizza/api/search/… */
 function normalizePublic(item) {
+    const derived = publicGlbFromPreview(item.previewUrl);
     return {
         assetType: 'model',
         source: 'polypizza',
@@ -52,9 +72,10 @@ function normalizePublic(item) {
         description: `By ${item.creator?.username || 'Unknown'}`,
         thumbnailUrl: item.previewUrl || null,
         viewerUrl: item.publicID ? `https://poly.pizza/m/${item.publicID}` : null,
-        modelUrl: null,
-        loadableInScene: false,
-        format: 'gltf',
+        modelUrl: derived,
+        loadableInScene: Boolean(derived),
+        applicableInEditor: Boolean(derived),
+        format: 'glb',
         license: item.licence || 'CC0',
         categories: [],
         tags: (item.title || '').toLowerCase().split(/\s+/).filter(w => w.length > 2),

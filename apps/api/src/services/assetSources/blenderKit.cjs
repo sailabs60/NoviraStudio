@@ -93,9 +93,18 @@ function pickModelDownload(files = []) {
     return [...list].sort((a, b) => score(b) - score(a)).find((f) => score(f) > 0) || null;
 }
 
+/*
+ * `assetBaseId` first, deliberately.
+ *
+ * BlenderKit's search endpoint can be queried by `asset_base_id:<uuid>` and
+ * cannot be queried by the numeric `id`. Handing out the numeric id means
+ * every later lookup for that row returns zero results, which is exactly how
+ * a drawer full of BlenderKit models ends up reporting "BlenderKit no longer
+ * lists that asset" for assets it is still listing.
+ */
 function bkAssetId(item) {
-    if (item?.id != null) return String(item.id);
     if (item?.assetBaseId != null) return String(item.assetBaseId);
+    if (item?.id != null) return String(item.id);
     return null;
 }
 
@@ -154,6 +163,15 @@ function normalizeModel(item) {
         purchaseUrl: viewerUrl,
         // Direct CDN URLs expire — editor always loads via `/asset-store/blenderkit/model/:id`.
         modelUrl: null,
+        /*
+         * The `/api/v1/downloads/<n>/` endpoint for this row's glTF file.
+         *
+         * Kept so resolving a row is one call to that endpoint rather than a
+         * fresh search followed by a second call. It is not a CDN URL and does
+         * not expire; it is exchanged for a short-lived signed one at the
+         * moment somebody actually drops the model into the scene.
+         */
+        downloadApiUrl: modelFile?.downloadUrl || modelFile?.url || null,
         loadableInScene: canUseBridge,
         accessLabel: bkAccessLabel(item),
         accessTier: item?.isFree === true ? 'free' : 'paid',
@@ -191,6 +209,9 @@ function normalizeHdri(item) {
         viewerUrl,
         purchaseUrl: viewerUrl,
         hdriUrl: null,
+        // Same exchange as a model: a stable per-file endpoint traded for a
+        // signed CDN link at the moment the environment is actually applied.
+        downloadApiUrl: hdri?.downloadUrl || hdri?.url || null,
         loadableInScene: canUseBridge,
         accessLabel: bkAccessLabel(item),
         accessTier: item?.isFree === true ? 'free' : 'paid',

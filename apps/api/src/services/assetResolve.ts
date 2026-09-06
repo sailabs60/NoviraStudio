@@ -15,6 +15,7 @@
  * a designer is never surprised by a button that does nothing.
  */
 import { randomUUID } from 'node:crypto';
+import { rewritePolyHavenGltf } from './gltfRewrite.js';
 
 const TIMEOUT_MS = 20_000;
 const UA = 'Novira/1.0 (asset resolver)';
@@ -23,6 +24,45 @@ export type ResolvedAsset =
   | { status: 'ready'; url: string; format: 'glb' | 'gltf' | 'zip'; expiresInSec?: number }
   | { status: 'external'; url: string; reason: string }
   | { status: 'unavailable'; reason: string };
+
+/**
+ * Hosts whose bytes are fine but whose headers are not.
+ *
+ * A signed CDN link can return 200 and still be unusable in a browser: with no
+ * `Access-Control-Allow-Origin` the fetch is refused before three.js ever sees
+ * a byte, which surfaces as a bare "Failed to fetch". BlenderKit's asset CDN is
+ * the case that matters here — it serves the GLB happily to curl and refuses it
+ * to the viewport.
+ *
+ * Routing those through our own proxy re-serves the same bytes same-origin with
+ * the headers a browser will accept. It is deliberately a short list rather
+ * than a blanket rule: everything else is served direct, which is faster and
+ * keeps the traffic off this server.
+ */
+const NEEDS_PROXY = ['assets.blenderkit.com', 'blenderkit.com', 'blenderkit-cdn.com'];
+
+function needsProxy(rawUrl: string): boolean {
+  try {
+    const host = new URL(rawUrl).hostname.toLowerCase();
+    return NEEDS_PROXY.some((h) => host === h || host.endsWith(`.${h}`));
+  } catch {
+    return false;
+  }
+}
+
+/** Re-serve a URL through our own proxy so the browser gets CORS headers. */
+function proxied(rawUrl: string): string {
+  const base = (process.env.PUBLIC_BASE_URL ?? '').trim().replace(/\/$/, '');
+  if (!base) return rawUrl;
+  return `${base}/api/assets/proxy?url=${encodeURIComponent(rawUrl)}`;
+}
+
+/** Apply the proxy to a ready result when the host demands it. */
+function withCors(result: ResolvedAsset): ResolvedAsset {
+  if (result.status !== 'ready') return result;
+  if (!needsProxy(result.url)) return result;
+  return { ...result, url: proxied(result.url) };
+}
 
 async function getJson<T>(url: string, headers: Record<string, string> = {}): Promise<T | null> {
   const controller = new AbortController();
@@ -61,7 +101,7 @@ async function resolveSketchfab(uid: string, viewerUrl?: string): Promise<Resolv
     return {
       status: 'external',
       url: fallback,
-      reason: 'Sketchfab downloads need an account. Open it there, then import the file.',
+      reason: 'Sketchfab needs an account to download. Try another library — most models here load directly.',
     };
   }
 
@@ -101,8 +141,21 @@ interface BlenderKitRow {
  * request — without it the signed-URL endpoint answers 403. The URL that comes
  * back expires, which is why it is fetched here at click time rather than
  * cached with the row.
+ *
+ * `downloadApiUrl` is the fast path: the search row already knows which of the
+ * asset's files is the glTF, so when it is present this is one call instead of
+ * a search followed by a call. The search fallback stays for rows minted
+ * before that field existed.
  */
-async function resolveBlenderKit(assetBaseId: string): Promise<ResolvedAsset> {
+async function resolveBlenderKit(
+  assetBaseId: string,
+  downloadApiUrl?: string | null
+): Promise<ResolvedAsset> {
+  if (downloadApiUrl) {
+    const direct = await exchangeBlenderKitDownload(downloadApiUrl);
+    if (direct) return direct;
+  }
+
   const search = await getJson<{ results?: BlenderKitRow[] }>(
     `https://www.blenderkit.com/api/v1/search/?query=asset_base_id:${encodeURIComponent(assetBaseId)}&page_size=1`
   );
@@ -127,14 +180,31 @@ async function resolveBlenderKit(assetBaseId: string): Promise<ResolvedAsset> {
     };
   }
 
-  const separator = file.downloadUrl.includes('?') ? '&' : '?';
-  const resolved = await getJson<{ filePath?: string }>(
-    `${file.downloadUrl}${separator}scene_uuid=${randomUUID()}`
+  const exchanged = await exchangeBlenderKitDownload(file.downloadUrl);
+  if (exchanged) return exchanged;
+  return { status: 'unavailable', reason: 'BlenderKit refused the download link.' };
+}
+
+/**
+ * Trade a BlenderKit `/api/v1/downloads/<n>/` endpoint for a signed CDN link.
+ *
+ * The `scene_uuid` is mandatory — BlenderKit answers 403 without one — and the
+ * value is never checked, so a fresh random UUID per call is correct. The
+ * returned link is short-lived, which is the whole reason this happens at drop
+ * time rather than at search time.
+ *
+ * The file behind it is a `.glb` despite the `gltf` file type, so the format is
+ * read from the URL rather than assumed.
+ */
+async function exchangeBlenderKitDownload(downloadUrl: string): Promise<ResolvedAsset | null> {
+  const separator = downloadUrl.includes('?') ? '&' : '?';
+  const resolved = await getJson<{ filePath?: string; file_path?: string; url?: string }>(
+    `${downloadUrl}${separator}scene_uuid=${randomUUID()}`
   );
-  if (!resolved?.filePath) {
-    return { status: 'unavailable', reason: 'BlenderKit refused the download link.' };
-  }
-  return { status: 'ready', url: resolved.filePath, format: 'gltf' };
+  const filePath = resolved?.filePath ?? resolved?.file_path ?? resolved?.url;
+  if (!filePath) return null;
+  const format = /\.glb(\?|$)/i.test(filePath) ? 'glb' : 'gltf';
+  return withCors({ status: 'ready', url: filePath, format });
 }
 
 /* ── Poly Pizza ────────────────────────────────────────────────────────── */
@@ -169,6 +239,8 @@ export interface ResolveRequest {
   sourceAssetId: string;
   /** Already-known direct URL, when the search row carried one. */
   modelUrl?: string | null;
+  /** A provider endpoint to exchange for a signed URL. See `ProviderAsset`. */
+  downloadApiUrl?: string | null;
   viewerUrl?: string | null;
 }
 
@@ -180,6 +252,22 @@ export async function resolveAsset(req: ResolveRequest): Promise<ResolvedAsset> 
       : /\.zip(\?|$)/i.test(req.modelUrl)
         ? 'zip'
         : 'gltf';
+
+    /*
+     * A bare `.gltf` is a document with relative links, and at least one
+     * provider puts the files it links to somewhere those links cannot reach.
+     * Rewriting turns it into something the browser can load in one request;
+     * when that is not possible the original URL is served unchanged, which
+     * is exactly the previous behaviour.
+     */
+    if (format === 'gltf') {
+      const base = (process.env.PUBLIC_BASE_URL ?? '').trim();
+      if (base) {
+        const rewritten = await rewritePolyHavenGltf(req.modelUrl, base);
+        if (rewritten) return { status: 'ready', url: rewritten, format: 'gltf' };
+      }
+    }
+
     return { status: 'ready', url: req.modelUrl, format };
   }
 
@@ -187,7 +275,7 @@ export async function resolveAsset(req: ResolveRequest): Promise<ResolvedAsset> 
     case 'sketchfab':
       return resolveSketchfab(req.sourceAssetId, req.viewerUrl ?? undefined);
     case 'blenderkit':
-      return resolveBlenderKit(req.sourceAssetId);
+      return resolveBlenderKit(req.sourceAssetId, req.downloadApiUrl);
     case 'polypizza':
       return resolvePolyPizza(req.sourceAssetId, req.viewerUrl ?? undefined);
     default:
