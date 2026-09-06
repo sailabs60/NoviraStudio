@@ -296,7 +296,7 @@ const SECTIONS: Array<{
     items: [
       {
         q: 'How do I look around?',
-        a: 'Drag with the left mouse button to orbit, drag with the right to slide the view sideways, and scroll to zoom in and out. On a trackpad, two fingers scroll and zoom.',
+        a: 'On a trackpad, slide two fingers to move around, pinch to zoom, and drag to orbit — no modifier keys needed. On a mouse, left-drag orbits, right-drag moves around, and the wheel zooms toward the cursor. Hold Shift and drag with the right button to fly with WASD. Press F to fit everything back on screen.',
       },
       {
         q: 'I have lost the model — where did it go?',

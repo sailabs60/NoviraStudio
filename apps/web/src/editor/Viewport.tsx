@@ -1285,15 +1285,275 @@ function CameraRestore({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
   return null;
 }
 
+/*
+ * -- Trackpad and wheel navigation ---------------------------------------
+ *
+ * The gesture layer that makes this viewport usable without a three-button
+ * mouse, which is what most people are actually holding.
+ *
+ * The browser hands us exactly one event for all of it, `wheel`, and the job
+ * is telling three very different physical gestures apart inside it:
+ *
+ *  - **Pinch on a trackpad.** Browsers report this as a wheel event with
+ *    `ctrlKey` forced true, a convention IE10 started and Chrome and Firefox
+ *    both adopted. It is indistinguishable from a real Ctrl+wheel by design,
+ *    which is fine here because we want both to mean the same thing: zoom.
+ *  - **Two-finger scroll on a trackpad.** A plain wheel event, but with small
+ *    fractional deltas arriving in a dense stream and, crucially, a non-zero
+ *    `deltaX` whenever the fingers drift sideways. This is the gesture that
+ *    had no meaning in the old scheme, and giving it "pan" is what removes
+ *    the middle-mouse-button requirement.
+ *  - **A real mouse wheel.** Large, discrete, quantised deltas (100, 120,
+ *    150) with `deltaX` always exactly zero, or `deltaMode` reporting lines
+ *    rather than pixels. A mouse has no pan gesture to offer, so for a wheel
+ *    the only sensible meaning is zoom.
+ *
+ * The delta magnitudes genuinely do vary across browser, OS and hardware, so
+ * the classifier does not lean on any single threshold: a horizontal
+ * component or a fractional delta each prove a trackpad on their own, and
+ * once proven we remember it for the rest of the session. A device that
+ * never produces either is treated as a wheel, which is the safe default:
+ * the worst case is that scrolling zooms, which is what a wheel user expects
+ * anyway.
+ */
+
+/** Above this, with no fractional part and no deltaX, it is a mouse wheel. */
+const WHEEL_DELTA_FLOOR = 45;
+/** Trackpad pans track the fingers one to one. */
+const TRACKPAD_PAN_SCALE = 1.0;
+/** Pinch deltas are small, so they need a larger multiplier than a wheel. */
+const PINCH_ZOOM_SCALE = 0.011;
+const WHEEL_ZOOM_SCALE = 0.0016;
+
+/**
+ * Pan and zoom the camera from trackpad gestures, with no modifier keys.
+ *
+ * OrbitControls own wheel handling only ever dollies, so it is switched off
+ * (`enableZoom={false}`) and replaced wholesale here. That way one place
+ * decides what a given gesture means, rather than two handlers racing over
+ * the same event.
+ *
+ * Both operations are written against the controls target as well as the
+ * camera, because that target is what every other part of the viewport
+ * orbits and frames around. Moving the camera without moving the target is
+ * what makes a view slowly start rotating about a point behind you.
+ */
+function TrackpadNavigation({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
+  const { camera, gl, size } = useThree();
+  // Once a device proves it is a trackpad it stays one: a slow, careful
+  // two-finger drag can produce a stream of whole-number deltas that would
+  // otherwise be misread as a wheel halfway through the gesture.
+  const isTrackpad = useRef(false);
+
+  useEffect(() => {
+    const dom = gl.domElement;
+
+    /*
+     * Record where a gesture left the camera, so the view survives a reload.
+     *
+     * Debounced, because a pan fires on every wheel event and each commit
+     * walks the scene draft: writing the pose sixty times a second turns a
+     * smooth two-finger drag into a stutter. A quarter second after the
+     * fingers stop is soon enough for something only read on load.
+     */
+    let poseTimer = 0;
+    const rememberPose = () => {
+      window.clearTimeout(poseTimer);
+      poseTimer = window.setTimeout(() => {
+        const cam = currentCamera();
+        if (cam) useEditor.getState().setCameraPose(cam);
+      }, 250);
+    };
+
+    /**
+     * Move the camera along its own screen plane, so dragging two fingers
+     * down moves the view down no matter what angle the camera sits at. The
+     * distance is scaled by how far away the target is, so a pan covers the
+     * same amount of *screen* whether you are inspecting a chair or looking
+     * at the whole hall.
+     */
+    const panBy = (dx: number, dy: number) => {
+      const controls = orbitRef.current;
+      if (!controls) return;
+      const offset = camera.position.clone().sub(controls.target);
+      const distance = offset.length();
+      // Matches OrbitControls own pan maths: the visible height at the
+      // target distance, divided by the viewport height, is the world
+      // distance that one pixel represents.
+      const fov = ((camera as THREE.PerspectiveCamera).fov ?? 50) * DEG;
+      const perPixel = (2 * distance * Math.tan(fov / 2)) / size.height;
+
+      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
+      const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
+      const move = right.multiplyScalar(-dx * perPixel).add(up.multiplyScalar(dy * perPixel));
+
+      camera.position.add(move);
+      controls.target.add(move);
+      controls.update();
+      invalidate();
+      rememberPose();
+    };
+
+    /**
+     * Dolly the camera toward or away from the point under the cursor.
+     *
+     * Zooming at the middle of the screen turns every approach to a corner
+     * of the plan into zoom, pan, zoom, pan. Zooming at the cursor means you
+     * point at a thing and arrive at it, which is the single biggest
+     * difference between a viewport that feels accurate and one that feels
+     * like wrestling.
+     */
+    const zoomToward = (clientX: number, clientY: number, amount: number) => {
+      const controls = orbitRef.current;
+      if (!controls) return;
+      const scale = Math.exp(amount);
+
+      const offset = camera.position.clone().sub(controls.target);
+      const distance = offset.length();
+      const next = THREE.MathUtils.clamp(
+        distance * scale,
+        controls.minDistance ?? 0.4,
+        controls.maxDistance ?? 400
+      );
+      // At the stops, dollying does nothing, but the cursor pull below would
+      // still slide the view, which reads as drift. Stop entirely.
+      if (Math.abs(next - distance) < 1e-6) return;
+
+      camera.position.copy(controls.target).add(offset.multiplyScalar(next / distance));
+
+      /*
+       * Pull the target toward the cursor by the fraction we just closed.
+       * Zooming ten per cent of the way in moves the target ten per cent of
+       * the way toward whatever is under the pointer, so the thing you are
+       * pointing at converges on the centre as you arrive. This is the
+       * behaviour OrbitControls own `zoomToCursor` produces, reimplemented
+       * because this handler has taken the wheel over.
+       */
+      const closed = 1 - next / distance;
+      if (Math.abs(closed) > 1e-6) {
+        const rect = dom.getBoundingClientRect();
+        const ndc = new THREE.Vector3(
+          ((clientX - rect.left) / rect.width) * 2 - 1,
+          -((clientY - rect.top) / rect.height) * 2 + 1,
+          0.5
+        );
+        const ray = ndc.unproject(camera).sub(camera.position).normalize();
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        const along = ray.dot(forward);
+        if (along > 0.01) {
+          const hit = camera.position.clone().addScaledVector(ray, next / along);
+          const shift = hit.sub(controls.target).multiplyScalar(closed);
+          controls.target.add(shift);
+          camera.position.add(shift);
+        }
+      }
+
+      controls.update();
+      invalidate();
+      rememberPose();
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      const controls = orbitRef.current;
+      if (!controls || !controls.enabled) return;
+      // Flying owns the input while it is held.
+      if (useEditor.getState().flying) return;
+      e.preventDefault();
+
+      const absX = Math.abs(e.deltaX);
+      const absY = Math.abs(e.deltaY);
+
+      // Evidence of a trackpad: sideways movement, or sub-pixel precision.
+      if (absX > 0 || (e.deltaMode === 0 && absY > 0 && absY < WHEEL_DELTA_FLOOR)) {
+        isTrackpad.current = true;
+      }
+
+      useEditor.getState().markCameraTouched();
+
+      /*
+       * Pinch, or Ctrl+wheel: the same event either way, and the same
+       * meaning. Zoom toward the cursor so the point under the fingers is
+       * the point that stays put, which is what makes a pinch feel like it
+       * is grabbing the model rather than scaling the screen.
+       */
+      if (e.ctrlKey || e.metaKey) {
+        zoomToward(e.clientX, e.clientY, e.deltaY * (isTrackpad.current ? PINCH_ZOOM_SCALE : WHEEL_ZOOM_SCALE));
+        return;
+      }
+
+      /*
+       * A plain wheel on a real mouse has nothing else it could mean, so it
+       * zooms: the convention every 3D tool shares, and the first thing a
+       * mouse user will try.
+       */
+      if (!isTrackpad.current) {
+        zoomToward(e.clientX, e.clientY, e.deltaY * WHEEL_ZOOM_SCALE);
+        return;
+      }
+
+      /*
+       * Two-finger scroll on a trackpad: pan. Shift swaps it to zoom for
+       * anyone carrying that reflex over from another tool, but nothing here
+       * *requires* a modifier, which is the whole point of this handler.
+       */
+      if (e.shiftKey && absX === 0) {
+        zoomToward(e.clientX, e.clientY, e.deltaY * PINCH_ZOOM_SCALE);
+        return;
+      }
+      panBy(e.deltaX * TRACKPAD_PAN_SCALE, e.deltaY * TRACKPAD_PAN_SCALE);
+    };
+
+    /*
+     * Safari reports pinches as its own proprietary gesture events instead
+     * of Ctrl+wheel, so without these a Mac user in Safari has no zoom.
+     * `scale` is cumulative across the gesture, hence the running previous
+     * value rather than a per-event delta.
+     */
+    const gestureCentre = { x: 0, y: 0 };
+    let lastScale = 1;
+    const onGestureStart = (e: any) => {
+      e.preventDefault();
+      lastScale = 1;
+      gestureCentre.x = e.clientX;
+      gestureCentre.y = e.clientY;
+    };
+    const onGestureChange = (e: any) => {
+      e.preventDefault();
+      if (useEditor.getState().flying) return;
+      const ratio = e.scale / (lastScale || 1);
+      lastScale = e.scale;
+      if (!Number.isFinite(ratio) || ratio <= 0) return;
+      zoomToward(gestureCentre.x, gestureCentre.y, -Math.log(ratio));
+    };
+
+    dom.addEventListener('wheel', onWheel, { passive: false });
+    dom.addEventListener('gesturestart', onGestureStart as EventListener);
+    dom.addEventListener('gesturechange', onGestureChange as EventListener);
+    return () => {
+      window.clearTimeout(poseTimer);
+      dom.removeEventListener('wheel', onWheel);
+      dom.removeEventListener('gesturestart', onGestureStart as EventListener);
+      dom.removeEventListener('gesturechange', onGestureChange as EventListener);
+    };
+  }, [camera, gl, orbitRef, size.height]);
+
+  return null;
+}
+
 const FLY_MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE']);
 const FLY_LOOK_SPEED = 0.0025;
 const FLY_SPEED = 6;
 const FLY_BOOST = 2.4;
 
 /**
- * Hold-right-click free-fly navigation, the way Enscape, Twinmotion and Unreal
- * do it — the convention anyone who has ever looked around a rendered building
- * already knows.
+ * Hold Shift and the right button to fly, the way Enscape, Twinmotion and
+ * Unreal do it: the convention anyone who has ever looked around a rendered
+ * building already knows.
+ *
+ * It sits behind Shift because the bare right-drag was reassigned to pan.
+ * Panning is the move every user makes constantly and the one a trackpad has
+ * no other way to reach; flying is the move an experienced user goes looking
+ * for, and will find in the navigation hint.
  *
  * OrbitControls owns the camera the rest of the time, so the trick is not
  * fighting it: drei's wrapper only calls `controls.update()` — the thing that
@@ -1343,7 +1603,9 @@ function FlyNavigation({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
     const onContextMenu = (e: MouseEvent) => e.preventDefault();
 
     const onPointerDown = (e: PointerEvent) => {
-      if (e.button !== 2) return;
+      // Shift+right-drag. A plain right-drag pans, because panning is the
+      // move everybody needs and flying is the one experts go looking for.
+      if (e.button !== 2 || !e.shiftKey) return;
       e.preventDefault();
       active.current = true;
       setFlying(true);
@@ -1842,6 +2104,7 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
       <WalkthroughCamera orbitRef={orbitRef} />
       <FlyNavigation orbitRef={orbitRef} />
       <BoxSelect orbitRef={orbitRef} />
+      <TrackpadNavigation orbitRef={orbitRef} />
       <SelectionAnchor />
 
       {objects
@@ -1866,16 +2129,6 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
         enableDamping
         dampingFactor={0.08}
         /*
-         * Zoom toward the cursor, not toward the middle of the screen.
-         *
-         * This is the single biggest difference between a viewport that feels
-         * accurate and one that feels like wrestling. Zooming to the centre
-         * means every approach to a corner of the plan is zoom, pan, zoom,
-         * pan; zooming to the cursor means you point at the thing and arrive
-         * at it. Every CAD and 3D tool worth using does this.
-         */
-        zoomToCursor
-        /*
          * Pan on the screen plane rather than along the ground.
          *
          * Dragging up should move the view up, whatever angle the camera is
@@ -1884,17 +2137,23 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
          */
         screenSpacePanning
         /*
-         * Middle-drag pans. It used to be the right button's job, and the
-         * right button now flies — so without this there would be no pan
-         * gesture left at all, which is not an acceptable trade for the fly
-         * navigation.
+         * The wheel belongs to `TrackpadNavigation`, which is the only place
+         * that can tell a two-finger pan from a pinch from a mouse wheel.
+         * Leaving this on would mean two handlers fighting over one event.
+         */
+        enableZoom={false}
+        /*
+         * Right-drag pans, so a plain two-button mouse can do everything
+         * without a middle button or a keyboard. Fly moved to Shift+right,
+         * which is the trade that buys it: panning is the move everybody
+         * needs constantly, flying is the one experts reach for.
          */
         mouseButtons={{
           LEFT: THREE.MOUSE.ROTATE,
           MIDDLE: THREE.MOUSE.PAN,
           RIGHT: THREE.MOUSE.PAN,
         }}
-        /* One finger orbits, two pan and pinch — the phone convention. */
+        /* One finger orbits, two pan and pinch: the phone convention. */
         touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
         maxPolarAngle={cameraMode === 'top' ? 0.001 : Math.PI / 2.05}
         minDistance={0.4}
@@ -1987,39 +2246,74 @@ export function Viewport() {
  * toolbar is a separate row below the canvas rather than an overlay on it, so
  * nothing here competes with either.
  */
-const NAV_KEYS: Array<[string, string]> = [
-  ['Drag', 'Orbit'],
-  ['Middle-drag', 'Pan'],
-  ['Scroll', 'Zoom to the cursor'],
-  ['Right-drag', 'Fly — WASD, Q/E, Shift to go faster'],
-  ['Double-click', 'Go to that object'],
-  ['F', 'Frame the selection'],
-  ['Ctrl-drag', 'Box-select'],
-  ['Ctrl+A', 'Select everything'],
-  ['Numpad 7/1/3', 'Top, front, side — Ctrl for the opposite'],
-  ['Numpad 4/6/8/2', 'Orbit a step at a time'],
-  ['Numpad +/−', 'Zoom · Numpad 0 frames everything'],
+/**
+ * The navigation cheatsheet.
+ *
+ * Grouped by what the user is holding rather than by action, because that is
+ * the question someone actually has: they know they want to pan, and they
+ * need to know what *their* hardware does. A trackpad user reading a row
+ * about the middle mouse button learns nothing.
+ *
+ * The trackpad column comes first deliberately. It is the device most people
+ * are on, and it was the one the old scheme served worst: with pan on the
+ * middle button and box-select behind Ctrl, a laptop user had no way to pan
+ * at all.
+ */
+const NAV_GROUPS: Array<{ heading: string; rows: Array<[string, string]> }> = [
+  {
+    heading: 'Trackpad',
+    rows: [
+      ['Two fingers', 'Pan around'],
+      ['Pinch', 'Zoom in and out'],
+      ['Drag', 'Orbit'],
+      ['Shift + two fingers', 'Zoom'],
+    ],
+  },
+  {
+    heading: 'Mouse',
+    rows: [
+      ['Left-drag', 'Orbit'],
+      ['Right-drag', 'Pan around'],
+      ['Scroll', 'Zoom to the cursor'],
+      ['Shift + right-drag', 'Fly: WASD, Q/E, Shift boosts'],
+    ],
+  },
+  {
+    heading: 'Anywhere',
+    rows: [
+      ['Double-click', 'Go to that object'],
+      ['F', 'Frame the selection'],
+      ['Ctrl+A', 'Select everything'],
+      ['Ctrl-drag', 'Box-select'],
+      ['Numpad 7/1/3', 'Top, front, side'],
+      ['Numpad 0', 'Frame everything'],
+    ],
+  },
 ];
 
 /**
  * The navigation scheme, for anyone who has not found it yet.
  *
- * A chip rather than a sentence: the full map is eleven lines, which is a
- * wall of text to leave permanently over someone's plan, and one line is not
- * enough to be worth reading. So it sits closed, says the one thing worth
- * knowing, and opens on hover for the rest.
+ * A chip rather than a sentence: the full map is three columns, which is a
+ * wall of text to leave permanently over someone plan, and one line is not
+ * enough to be worth reading. So it sits closed, says the two gestures that
+ * cover almost everything, and opens on hover or click for the rest.
+ *
+ * It opens on **click** as well as hover because a hover-only disclosure is
+ * invisible to touch, and a tablet user needs this more than anyone.
  *
  * Bottom-left, because the gizmo compass owns bottom-right and the bottom
  * toolbar is a row below the canvas rather than an overlay on it.
  */
 function NavHint() {
   const flying = useEditor((s) => s.flying);
+  const [open, setOpen] = useState(false);
 
   if (flying) {
     return (
       <div className="pointer-events-none absolute bottom-3 left-3">
         <div className="rounded-full border border-primary/40 bg-primary/15 px-2.5 py-1 text-[10px] font-medium text-primary backdrop-blur">
-          Flying — WASD move · Q/E down and up · mouse look · Shift boost
+          Flying: WASD move, Q/E down and up, mouse look, Shift boost
         </div>
       </div>
     );
@@ -2027,23 +2321,39 @@ function NavHint() {
 
   return (
     <div className="group absolute bottom-3 left-3">
-      <div className="rounded-full border border-line/70 bg-surface/70 px-2.5 py-1 text-[10px] font-medium text-ink-subtle backdrop-blur transition group-hover:border-line group-hover:text-ink-muted">
-        Drag to orbit · scroll to zoom · <span className="font-semibold">more ways to move</span>
-      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="rounded-full border border-line/70 bg-surface/70 px-2.5 py-1 text-[10px] font-medium text-ink-subtle backdrop-blur transition hover:border-line hover:text-ink-muted"
+      >
+        Two fingers to pan, pinch to zoom &middot;{' '}
+        <span className="font-semibold">all the ways to move</span>
+      </button>
 
-      <div className="pointer-events-none absolute bottom-full left-0 mb-1.5 hidden w-[290px] group-hover:block">
-        <div className="panel p-2 shadow-xl">
-          <p className="mb-1.5 px-1 text-[10px] font-bold uppercase tracking-[0.08em] text-ink-subtle">
-            Moving around
-          </p>
-          <dl className="space-y-0.5">
-            {NAV_KEYS.map(([key, what]) => (
-              <div key={key} className="flex items-baseline gap-2 rounded px-1 py-0.5">
-                <dt className="w-[104px] shrink-0 text-[10px] font-semibold text-ink">{key}</dt>
-                <dd className="text-[10px] leading-snug text-ink-subtle">{what}</dd>
+      <div
+        className={`absolute bottom-full left-0 mb-1.5 w-[520px] ${
+          open ? 'block' : 'hidden group-hover:block'
+        }`}
+      >
+        <div className="panel p-3 shadow-xl">
+          <div className="grid grid-cols-3 gap-3">
+            {NAV_GROUPS.map((group) => (
+              <div key={group.heading}>
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-ink-subtle">
+                  {group.heading}
+                </p>
+                <dl className="space-y-1">
+                  {group.rows.map(([key, what]) => (
+                    <div key={key}>
+                      <dt className="text-[10px] font-semibold leading-tight text-ink">{key}</dt>
+                      <dd className="text-[10px] leading-tight text-ink-subtle">{what}</dd>
+                    </div>
+                  ))}
+                </dl>
               </div>
             ))}
-          </dl>
+          </div>
         </div>
       </div>
     </div>

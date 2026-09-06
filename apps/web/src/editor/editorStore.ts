@@ -1007,3 +1007,18 @@ export const useEditor = create<EditorState>((set, get) => ({
  * wrapped in `useShallow`. Deriving an array inside a plain zustand selector
  * re-renders forever — see the note in that file.
  */
+
+/*
+ * The store, reachable from the browser console in development.
+ *
+ * Navigation is the one part of this editor whose correctness cannot be seen
+ * in a screenshot: a pan and a zoom both just "change the view", and telling
+ * them apart needs the camera position and its distance to the orbit target.
+ * Exposing the store is what lets an end-to-end test — or a person poking at
+ * a viewport that feels wrong — read those numbers directly.
+ *
+ * Development only, so nothing is added to the production bundle.
+ */
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __NOVIRA_STORE__?: typeof useEditor }).__NOVIRA_STORE__ = useEditor;
+}

@@ -26,7 +26,7 @@ const STEPS: Step[] = [
   {
     panel: null,
     title: 'This is your room, in 3D',
-    body: 'Drag with the left mouse button to orbit, the right to pan, and scroll to zoom. Press F at any time to fit everything back on screen — you cannot get lost.',
+    body: 'On a trackpad: slide two fingers to move around, pinch to zoom, drag to orbit. On a mouse: left-drag orbits, right-drag moves around, scroll zooms. Press F at any time to fit everything back on screen — you cannot get lost.',
   },
   {
     panel: 'add',
