@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { mmToWorld, sampleWalkthrough, walkthroughDuration } from '@novira/shared';
@@ -30,9 +30,27 @@ export function WalkthroughCamera({ orbitRef }: { orbitRef: React.MutableRefObje
   const setPlayhead = useEditor((s) => s.setPlayhead);
   const setPlaying = useEditor((s) => s.setPlaying);
 
-  const { camera } = useThree();
+  const { camera, invalidate } = useThree();
   const last = useRef<number>(0);
   const wasPlaying = useRef(false);
+
+  /**
+   * Give the camera back.
+   *
+   * Re-aims the orbit target at whatever the camera is actually looking at, so
+   * the next drag continues from the shot instead of swinging back to wherever
+   * the target was before playback started.
+   */
+  const release = useCallback(() => {
+    const controls = orbitRef.current;
+    if (!controls) return;
+    const direction = new THREE.Vector3();
+    camera.getWorldDirection(direction);
+    controls.target.copy(camera.position.clone().add(direction.multiplyScalar(8)));
+    controls.enabled = true;
+    controls.update();
+    invalidate();
+  }, [orbitRef, camera]);
 
   useEffect(() => {
     const controls = orbitRef.current;
@@ -42,17 +60,41 @@ export function WalkthroughCamera({ orbitRef }: { orbitRef: React.MutableRefObje
       controls.enabled = false;
       wasPlaying.current = true;
       last.current = performance.now();
-    } else if (wasPlaying.current) {
-      wasPlaying.current = false;
-      // Hand the camera back where it is actually looking, so the next drag
-      // continues from the shot rather than snapping to the old target.
-      const direction = new THREE.Vector3();
-      camera.getWorldDirection(direction);
-      controls.target.copy(camera.position.clone().add(direction.multiplyScalar(8)));
-      controls.enabled = true;
-      controls.update();
+      return;
     }
-  }, [playing, orbitRef, camera]);
+
+    /*
+     * Release unconditionally when not playing.
+     *
+     * This used to be guarded by `wasPlaying`, on the reasoning that there is
+     * nothing to hand back if playback never started. That was wrong, and it
+     * is how the viewport froze: *scrubbing* the timeline, or clicking a shot,
+     * disables the controls to place the camera without ever setting `playing`
+     * to true — so the guard was false, the controls were never re-enabled,
+     * and orbit, pan and zoom were dead until the page was reloaded.
+     *
+     * Re-enabling controls that are already enabled costs nothing, so the safe
+     * version is simply to do it whenever playback is not running.
+     */
+    wasPlaying.current = false;
+    if (!controls.enabled) release();
+  }, [playing, orbitRef, release]);
+
+  /*
+   * And on the way out.
+   *
+   * Leaving the Video tab unmounts this component, and if it unmounts while
+   * the camera is held — mid-playback, or straight after a scrub — nothing
+   * else would ever hand it back. The controls belong to the viewport, not to
+   * this panel, so whatever state they were left in has to be undone here.
+   */
+  useEffect(() => () => {
+    const controls = orbitRef.current;
+    if (controls && !controls.enabled) {
+      controls.enabled = true;
+      controls.update?.();
+    }
+  }, [orbitRef]);
 
   useFrame(() => {
     if (!playing || !shots.length) return;
@@ -129,7 +171,16 @@ export function ScrubDriver({ orbitRef }: { orbitRef: React.MutableRefObject<any
     const sample = sampleWalkthrough(shots, playhead);
     if (!sample) return;
 
+    /*
+     * The controls are switched off only while the camera is being placed.
+     *
+     * OrbitControls would otherwise fight the assignment and snap the camera
+     * back on its next update. Leaving them off afterwards is what froze the
+     * viewport, so this is a momentary hold that the cleanup below always
+     * undoes — including when the component unmounts mid-scrub.
+     */
     const controls = orbitRef.current;
+    const wasEnabled = controls ? controls.enabled : false;
     if (controls) controls.enabled = false;
 
     camera.position.set(
@@ -148,6 +199,13 @@ export function ScrubDriver({ orbitRef }: { orbitRef: React.MutableRefObject<any
       perspective.updateProjectionMatrix();
     }
     invalidate();
+
+    return () => {
+      if (controls && wasEnabled) {
+        controls.enabled = true;
+        controls.update?.();
+      }
+    };
   }, [playing, playhead, shots, camera, invalidate, orbitRef]);
 
   return null;
