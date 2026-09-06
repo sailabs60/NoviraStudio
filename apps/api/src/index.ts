@@ -36,6 +36,7 @@ import { aiSpatialRouter } from './routes/aiSpatialRoutes.js';
 import { assetsRouter } from './routes/assets.js';
 import { aiStudioRouter } from './routes/aiStudio.js';
 import { startAssetWarmer } from './services/assetRegistry.js';
+import { seedAccountsIfRequested } from './scripts/seedAccounts.js';
 import { attachCollaboration } from './services/collaboration.js';
 
 const app = express();
@@ -210,6 +211,15 @@ app.use(errorHandler);
 const server = app.listen(env.port, () => {
   console.log(`[novira-api] listening on http://localhost:${env.port}`);
 });
+
+/*
+ * Standing sign-in accounts, when the deployment asks for them.
+ *
+ * A no-op unless `SEED_ACCOUNTS_PASSWORD` is set, so local runs and any
+ * deployment that has not opted in are untouched. It happens after `listen`
+ * because it must never delay the port opening or fail the boot.
+ */
+void seedAccountsIfRequested();
 
 /*
  * Collaboration shares the HTTP server rather than opening its own port, so
