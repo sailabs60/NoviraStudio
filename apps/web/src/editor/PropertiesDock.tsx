@@ -6,6 +6,7 @@ import {
   formatLength,
   type SurfaceFinish,
 } from '@novira/shared';
+import { ResizeHandle, useStoredSize } from '../components/ResizeHandle';
 import { useEditor } from './editorStore';
 import { useSelectedObjects } from './selectors';
 import { partsOfObject } from './picking';
@@ -39,14 +40,33 @@ export function PropertiesDock({ onClose }: { onClose?: () => void }) {
   // Follow the selection. Selecting something is an unambiguous request to see
   // its properties; deselecting everything leaves the tab alone, because
   // yanking the panel away mid-edit is worse than a stale tab.
+  // A specification with long material names wants a wider dock than a
+  // transform with three numbers in it.
+  const [width, setWidth, resetWidth] = useStoredSize('rightDock', 312);
+
   useEffect(() => {
     if (selected.length) setTab('properties');
   }, [selected.length]);
 
   return (
+    <>
+      {/*
+        The handle sits on the dock's *outer* edge, between it and the
+        viewport, so the dock itself does not move — only its width changes.
+      */}
+      <ResizeHandle
+        side="left"
+        size={width}
+        onResize={setWidth}
+        onReset={resetWidth}
+        min={260}
+        max={640}
+        label="Properties width"
+      />
     <aside
       aria-label="Properties and simulation"
-      className="flex w-[312px] shrink-0 flex-col border-l border-line bg-surface"
+      className="flex shrink-0 flex-col border-l border-line bg-surface"
+      style={{ width }}
     >
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3">
         <Sliders className="h-4 w-4 shrink-0 text-ink-subtle" />
@@ -97,6 +117,7 @@ export function PropertiesDock({ onClose }: { onClose?: () => void }) {
         )}
       </div>
     </aside>
+    </>
   );
 }
 

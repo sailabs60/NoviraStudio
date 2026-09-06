@@ -17,6 +17,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { api, ApiClientError } from '../lib/api';
+import { ResizeHandle, useStoredSize } from '../components/ResizeHandle';
 import { useEditor, type WorkPanel } from '../editor/editorStore';
 import { capturePreview } from '../editor/capture';
 import { Viewport, currentCamera } from '../editor/Viewport';
@@ -294,25 +295,55 @@ function StudioStage() {
 function WorkPanelHost({ onClose }: { onClose: () => void }) {
   const workPanel = useEditor((s) => s.workPanel);
   const tool = useEditor((s) => s.tool);
+  /*
+   * The library's width is the user's, not ours. Browsing furniture wants it
+   * wide; laying out a room wants it out of the way. 280 is about as narrow as
+   * the asset grid stays legible, and 720 leaves a usable viewport on a
+   * 1280 px screen.
+   */
+  const [width, setWidth, resetWidth] = useStoredSize('leftPanel', 368);
+
+  const handle = (
+    <ResizeHandle
+      side="right"
+      size={width}
+      onResize={setWidth}
+      onReset={resetWidth}
+      min={280}
+      max={720}
+      label="Library width"
+    />
+  );
 
   if (tool === 'wall' || tool === 'draw') {
     return (
-      <aside className="ed-panel w-[368px] shrink-0 overflow-y-auto border-r" aria-label="Drawing tool">
-        {tool === 'wall' ? <WallPanel /> : <DraftPanel />}
-      </aside>
+      <>
+        <aside
+          className="ed-panel shrink-0 overflow-y-auto border-r"
+          style={{ width }}
+          aria-label="Drawing tool"
+        >
+          {tool === 'wall' ? <WallPanel /> : <DraftPanel />}
+        </aside>
+        {handle}
+      </>
     );
   }
 
   return (
-    <aside
-      className="ed-panel flex w-[368px] shrink-0 flex-col overflow-hidden border-r"
-      aria-label="Work panel"
-    >
-      <PanelHeader panel={workPanel} onClose={onClose} />
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <PanelBody panel={workPanel} />
-      </div>
-    </aside>
+    <>
+      <aside
+        className="ed-panel flex shrink-0 flex-col overflow-hidden border-r"
+        style={{ width }}
+        aria-label="Work panel"
+      >
+        <PanelHeader panel={workPanel} onClose={onClose} />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <PanelBody panel={workPanel} />
+        </div>
+      </aside>
+      {handle}
+    </>
   );
 }
 

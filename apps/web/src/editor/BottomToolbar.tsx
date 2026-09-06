@@ -15,6 +15,7 @@ import {
   Sun,
 } from 'lucide-react';
 import { useEditor } from './editorStore';
+import { ResizeHandle, useStoredSize } from '../components/ResizeHandle';
 import { ImportFlow } from './ImportFlow';
 import { HelpTip } from '../components/ui';
 import { SaveViewButton } from './SavedViews';
@@ -81,6 +82,9 @@ export function BottomToolbar({
     return () => observer.disconnect();
   }, []);
 
+  // One row by default; taller wraps so nothing is hidden past the edge.
+  const [height, setHeight, resetHeight] = useStoredSize('bottomBar', 44);
+
   /*
    * A ladder, each rung dropping the least useful thing still on screen. The
    * object count survives longest of the passive readouts because it is the
@@ -93,9 +97,32 @@ export function BottomToolbar({
   const showReadout = width >= 660;
 
   return (
+    <>
+      {/*
+        The bar's own height is adjustable.
+
+        At its default it is one row that scrolls sideways when it runs out of
+        space, which is right for a wide window. Dragged taller it wraps
+        instead, so on a narrow screen — or with both sidebars out — every
+        control is visible at once rather than hidden past the right edge.
+        The handle is on the top edge, so the bar stays pinned to the bottom
+        where it has always been.
+      */}
+      <ResizeHandle
+        side="top"
+        size={height}
+        onResize={setHeight}
+        onReset={resetHeight}
+        min={44}
+        max={160}
+        label="Toolbar height"
+      />
     <div
       ref={barRef}
-      className="flex h-11 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-surface px-2"
+      style={{ height }}
+      className={`flex shrink-0 items-center gap-1 border-t border-line bg-surface px-2 ${
+        height > 60 ? 'flex-wrap content-center overflow-y-auto py-1' : 'overflow-x-auto'
+      }`}
     >
       {/* ── Where the camera is ─────────────────────────────────────── */}
       <div className="ed-segment shrink-0">
@@ -259,6 +286,7 @@ export function BottomToolbar({
 
       <ImportFlow open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
+    </>
   );
 }
 
