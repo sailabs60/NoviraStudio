@@ -152,17 +152,90 @@ export function EditorPage() {
     return () => window.clearTimeout(timer.current);
   }, [dirty, readOnly, save, scene]);
 
-  // Warn before leaving with unsaved work.
+  /*
+   * Flush on the way out, and warn only if that could not be done.
+   *
+   * Autosave is debounced by four seconds, which is right while working and
+   * wrong at the moment of leaving: closing the tab inside that window threw
+   * away whatever had changed since the last save — most visibly the camera,
+   * so a plan reopened on the default view instead of where it was left.
+   *
+   * `visibilitychange` is the event that actually fires reliably when a tab is
+   * closed, switched away from, or backgrounded on a phone; `beforeunload` is
+   * not guaranteed and cannot await anything. So the flush happens on hidden,
+   * through `sendBeacon`, which the browser delivers *after* the page is gone
+   * rather than cancelling with it — the one mechanism built for this.
+   *
+   * The preview image is deliberately not captured here. Reading the canvas at
+   * teardown is slow and often fails outright, and a beacon has a size limit;
+   * the scene is what matters, and the next ordinary save refreshes the
+   * thumbnail.
+   */
   useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => {
-      if (useEditor.getState().dirty) {
+    const flush = () => {
+      const state = useEditor.getState();
+      if (!state.dirty || !state.planId || state.readOnly) return false;
+      try {
+        /*
+         * `fetch` with `keepalive`, not `sendBeacon`.
+         *
+         * A beacon cannot carry an Authorization header, and this API is
+         * token-authenticated, so a beacon would arrive anonymous and be
+         * rejected. A keepalive fetch has the same "outlives the page"
+         * guarantee and does take headers.
+         */
+        const token = localStorage.getItem('novira.token') ?? localStorage.getItem('token');
+        void fetch(`/api/plans/${state.planId}`, {
+          method: 'PATCH',
+          keepalive: true,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ scene: state.scene }),
+        });
+        // Handed to the browser, not acknowledged by the server — and this
+        // page is about to stop existing, so there is nothing to await.
+        return true;
+      } catch {
+        /* fall through to the warning */
+      }
+      return false;
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Only stand in the way if the work could not be handed off.
+      if (useEditor.getState().dirty && !flush()) {
         e.preventDefault();
         e.returnValue = '';
       }
     };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', onVisibility);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', onVisibility);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
   }, []);
+
+  /*
+   * Leaving the editor by navigating inside the app — clicking back to the
+   * dashboard — never fires an unload at all, so the same flush runs when this
+   * component goes away with work still pending.
+   */
+  useEffect(
+    () => () => {
+      if (useEditor.getState().dirty) void save();
+    },
+    [save]
+  );
 
   useKeyboardShortcuts(save, { setLeftOpen, setRightOpen });
 

@@ -56,6 +56,7 @@ import { Tent3D } from './Tent3D';
 import { Truss3D } from './Truss3D';
 import { LedScreen3D } from './LedScreen3D';
 import { LedQuickPanel } from './LedQuickPanel';
+import { TransformRail } from './TransformRail';
 import { Booth3D } from './Booth3D';
 import { LightFixture3D } from './LightFixture3D';
 import { Constraint3D, ConstraintDrawPreview } from './Constraint3D';
@@ -2322,6 +2323,7 @@ export function Viewport() {
         rather than a bar that follows the selection around and covers what is
         behind it.
       */}
+      <TransformRail />
       <SelectionToolbar />
       <LedQuickEditor />
       <Canvas
