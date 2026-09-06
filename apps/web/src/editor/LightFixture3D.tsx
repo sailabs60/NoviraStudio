@@ -6,6 +6,7 @@ import {
   mmToWorld,
   type LightFixtureSceneObject,
 } from '@novira/shared';
+import { CASE_COLOR, CASE_COLOR_MUTED, FixtureBody } from './fixtureBodies';
 
 /**
  * Lighting fixtures.
@@ -182,6 +183,19 @@ export function LightFixture3D({ light, selected, shadowsEnabled }: Props) {
   const beamLength = Math.min(localTarget.length() || 4, distance);
   const beamRadius = Math.tan(angle) * beamLength;
 
+  /*
+   * Where the beam leaves the fixture.
+   *
+   * The bodies are authored aiming down -Y with the lens at the far end, so
+   * the cone has to start at the fixture's own depth rather than at a fixed
+   * offset: a followspot barrel is 965 mm long and a pinspot 150 mm, and a
+   * single hard-coded figure either buries the beam inside the barrel or
+   * floats it in front of the lens. A moving head is the exception — its
+   * lens sits partway down the head, not at the end of the body.
+   */
+  const noseMm = spec.body === 'moving' ? spec.heightMm * 0.72 : spec.depthMm;
+  const beamStart = mmToWorld(noseMm);
+
   return (
     <group>
       {/* The aim point, as a scene object the light can target. */}
@@ -201,36 +215,22 @@ export function LightFixture3D({ light, selected, shadowsEnabled }: Props) {
         map={gobo ?? undefined}
       />
 
-      {/* The fixture body, oriented along the aim. */}
-      <group quaternion={bodyQuaternion}>
-        <mesh position={[0, -0.09, 0]} castShadow>
-          <cylinderGeometry args={[0.075, 0.095, 0.2, 12]} />
-          <meshStandardMaterial
-            color={selected ? '#0072FD' : light.muted ? '#4b5563' : '#22262c'}
-            roughness={0.55}
-            metalness={0.6}
-          />
-        </mesh>
-        {/* The lens, lit so a live fixture is obvious in a dark plan. */}
-        <mesh position={[0, -0.19, 0]}>
-          <circleGeometry args={[0.072, 16]} />
-          <meshStandardMaterial
-            color={light.color}
-            emissive={light.color}
-            emissiveIntensity={light.muted ? 0 : 1.6}
-            toneMapped={false}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-        {/* The yoke, which is what tells a rigger which way up it hangs. */}
-        <mesh position={[0, 0.02, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <torusGeometry args={[0.1, 0.012, 6, 16, Math.PI]} />
-          <meshStandardMaterial color="#2f333a" metalness={0.7} roughness={0.5} />
-        </mesh>
-        <mesh position={[0, 0.08, 0]}>
-          <cylinderGeometry args={[0.018, 0.018, 0.1, 8]} />
-          <meshStandardMaterial color="#2f333a" metalness={0.7} roughness={0.5} />
-        </mesh>
+      {/*
+        The fixture body, oriented along the aim.
+
+        The geometry is the real thing at its published size — a Source Four
+        silhouette for a profile, a base-yoke-head for a moving light, a grid
+        of open cells for a blinder — because a plot is read by silhouette and
+        fourteen identical cylinders is a scatter of markers, not a plot. See
+        `fixtureBodies.tsx`.
+      */}
+      <group quaternion={bodyQuaternion} userData={{ part: 'fixture' }}>
+        <FixtureBody
+          spec={spec}
+          caseColor={selected ? '#0072FD' : light.muted ? CASE_COLOR_MUTED : CASE_COLOR}
+          lampColor={light.color}
+          lampIntensity={light.muted ? 0 : 1.6}
+        />
 
         {/*
           The visible beam, in haze. A cone with an additive, depth-write-off
@@ -238,7 +238,7 @@ export function LightFixture3D({ light, selected, shadowsEnabled }: Props) {
           holes in each other, which is the classic wrong-looking beam.
         */}
         {light.volumetric && !light.muted && intensity > 0.05 ? (
-          <mesh position={[0, -beamLength / 2 - 0.18, 0]}>
+          <mesh position={[0, -beamLength / 2 - beamStart, 0]}>
             <coneGeometry args={[Math.max(0.05, beamRadius), beamLength, 20, 1, true]} />
             <meshBasicMaterial
               color={light.color}

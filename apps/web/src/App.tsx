@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { FixtureLabPage } from './pages/FixtureLabPage';
 import { useSession } from './store/session';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
@@ -73,6 +74,13 @@ export default function App() {
           redirecting them away outright would mean nobody could ever look at
           their own product's marketing page while logged in.
         */}
+        {/*
+          The fixture and truss workbench. Development only: it draws every
+          fixture body and truss section on a neutral turntable next to a
+          metre rule, which is the only way to check a silhouette and its
+          size without a plan getting in the way.
+        */}
+        {import.meta.env.DEV ? <Route path="/lab" element={<FixtureLabPage />} /> : null}
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />

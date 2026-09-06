@@ -65,6 +65,51 @@ export interface LightFixtureSpec {
   defaultColor: string;
   /** Typical distance the fixture is designed to throw, in millimetres. */
   throwMm: number;
+  /**
+   * Which physical shape this fixture is, for the 3D body.
+   *
+   * A rigger recognises a fixture by its silhouette long before reading a
+   * label, so the shapes are the real families rather than one generic can:
+   *
+   *  - `profile`   a long ellipsoidal barrel with a shutter barrel and bench.
+   *  - `fresnel`   a short square-ish housing with barn doors on the front.
+   *  - `par`       the parallel can: a plain cylinder, wider than it is deep.
+   *  - `panel`     a flat rectangular LED array on a yoke.
+   *  - `moving`    a base, a yoke that straddles it, and a head between.
+   *  - `blinder`   a grid of open lamp cells behind a mesh.
+   *  - `batten`    a long linear bar of cells.
+   *  - `uplighter` a small floor puck with no yoke at all.
+   *  - `followspot` a long barrel on a tripod stand with handles.
+   *  - `pinspot`   a very small can on a short stirrup.
+   */
+  body:
+    | 'profile'
+    | 'fresnel'
+    | 'par'
+    | 'panel'
+    | 'moving'
+    | 'blinder'
+    | 'batten'
+    | 'uplighter'
+    | 'followspot'
+    | 'pinspot';
+  /**
+   * Real overall size of the fixture, in millimetres.
+   *
+   * Taken from manufacturer data sheets for the fixture each entry stands in
+   * for, because a lighting plot is checked against the space a unit needs:
+   * whether it clears a truss chord, whether forty of them fit on a bar, and
+   * whether the yoke can swing without hitting the one beside it. A body
+   * modelled at an invented size answers all three questions wrongly.
+   *
+   * `widthMm` is across the yoke, `depthMm` front to back through the lens,
+   * and `heightMm` the overall height with the head level.
+   */
+  widthMm: number;
+  depthMm: number;
+  heightMm: number;
+  /** Diameter of the lens or aperture the light actually leaves through. */
+  lensMm: number;
 }
 
 export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
@@ -84,6 +129,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: true,
     defaultColor: '#fff4e2',
     throwMm: 9000,
+    body: 'profile',
+    widthMm: 254,
+    depthMm: 579,
+    heightMm: 511,
+    lensMm: 159,
   },
   fresnel: {
     key: 'fresnel',
@@ -101,6 +151,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: true,
     defaultColor: '#fff1d9',
     throwMm: 7000,
+    body: 'fresnel',
+    widthMm: 240,
+    depthMm: 230,
+    heightMm: 300,
+    lensMm: 150,
   },
   'par-can': {
     key: 'par-can',
@@ -118,6 +173,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: true,
     defaultColor: '#ffffff',
     throwMm: 6000,
+    body: 'par',
+    widthMm: 230,
+    depthMm: 262,
+    heightMm: 300,
+    lensMm: 200,
   },
   wash: {
     key: 'wash',
@@ -135,6 +195,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: false,
     defaultColor: '#ffffff',
     throwMm: 6000,
+    body: 'panel',
+    widthMm: 330,
+    depthMm: 190,
+    heightMm: 330,
+    lensMm: 260,
   },
   'moving-head-spot': {
     key: 'moving-head-spot',
@@ -152,6 +217,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: true,
     defaultColor: '#ffffff',
     throwMm: 14000,
+    body: 'moving',
+    widthMm: 431,
+    depthMm: 300,
+    heightMm: 642,
+    lensMm: 180,
   },
   'moving-head-wash': {
     key: 'moving-head-wash',
@@ -169,6 +239,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: true,
     defaultColor: '#ffffff',
     throwMm: 12000,
+    body: 'moving',
+    widthMm: 302,
+    depthMm: 220,
+    heightMm: 390,
+    lensMm: 190,
   },
   beam: {
     key: 'beam',
@@ -186,6 +261,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: true,
     defaultColor: '#dbe7ff',
     throwMm: 25000,
+    body: 'moving',
+    widthMm: 365,
+    depthMm: 250,
+    heightMm: 575,
+    lensMm: 130,
   },
   blinder: {
     key: 'blinder',
@@ -203,6 +283,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: false,
     defaultColor: '#ffd9a0',
     throwMm: 12000,
+    body: 'blinder',
+    widthMm: 490,
+    depthMm: 180,
+    heightMm: 410,
+    lensMm: 110,
   },
   'strip-batten': {
     key: 'strip-batten',
@@ -220,6 +305,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: false,
     defaultColor: '#ffffff',
     throwMm: 3000,
+    body: 'batten',
+    widthMm: 1000,
+    depthMm: 160,
+    heightMm: 180,
+    lensMm: 120,
   },
   uplighter: {
     key: 'uplighter',
@@ -237,6 +327,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: false,
     defaultColor: '#8b5cf6',
     throwMm: 5000,
+    body: 'uplighter',
+    widthMm: 210,
+    depthMm: 210,
+    heightMm: 250,
+    lensMm: 150,
   },
   'follow-spot': {
     key: 'follow-spot',
@@ -254,6 +349,15 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: true,
     defaultColor: '#fff8ec',
     throwMm: 30000,
+    body: 'followspot',
+    // A Robert Juliat Lucy measures 17 x 38 x 16.5 in. The 38 in is the
+    // fixture standing on its base, not the barrel: the barrel itself is
+    // about 650 mm, and the stand makes up the rest. Feeding the overall
+    // height in as the barrel length draws a followspot the size of a cannon.
+    widthMm: 430,
+    depthMm: 650,
+    heightMm: 420,
+    lensMm: 200,
   },
   'gobo-projector': {
     key: 'gobo-projector',
@@ -271,6 +375,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: true,
     defaultColor: '#ffffff',
     throwMm: 8000,
+    body: 'profile',
+    widthMm: 220,
+    depthMm: 470,
+    heightMm: 420,
+    lensMm: 140,
   },
   pinspot: {
     key: 'pinspot',
@@ -288,6 +397,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: false,
     defaultColor: '#fffaf0',
     throwMm: 6000,
+    body: 'pinspot',
+    widthMm: 90,
+    depthMm: 150,
+    heightMm: 150,
+    lensMm: 55,
   },
   'floor-wash': {
     key: 'floor-wash',
@@ -305,6 +419,11 @@ export const LIGHT_FIXTURE_SPECS: Record<LightFixtureKey, LightFixtureSpec> = {
     volumetric: false,
     defaultColor: '#ffffff',
     throwMm: 5000,
+    body: 'panel',
+    widthMm: 300,
+    depthMm: 260,
+    heightMm: 240,
+    lensMm: 230,
   },
 };
 

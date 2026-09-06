@@ -264,3 +264,21 @@ export function uniqueName(objects: SceneObject[], baseName: string): string {
   }
   return `${baseName} ${Date.now()}`;
 }
+
+/*
+ * The object factories, reachable from the browser console in development.
+ *
+ * Building a scene by hand is how the fixture bodies and truss sections get
+ * checked: a line-up of all fourteen fixture types, or a run of every truss
+ * system, is the only way to see that each one reads as the thing it is
+ * rather than as its neighbour. Reconstructing a valid scene object inside a
+ * test would duplicate the defaults that live here and drift from them.
+ *
+ * Development only, so nothing is added to the production bundle.
+ */
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __NOVIRA_FACTORIES__?: unknown }).__NOVIRA_FACTORIES__ = {
+    createLight,
+    createTruss,
+  };
+}
