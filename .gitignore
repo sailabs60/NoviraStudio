@@ -41,3 +41,6 @@ research/
 .DS_Store
 Thumbs.db
 *.log
+
+# Live sign-ins. Never commit these.
+loginCredentials.md
