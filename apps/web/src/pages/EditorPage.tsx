@@ -14,6 +14,7 @@ import {
   PanelRightOpen,
   Redo2,
   Save,
+  Sliders,
   Undo2,
 } from 'lucide-react';
 import { api, ApiClientError } from '../lib/api';
@@ -36,7 +37,7 @@ import { BuildPanel } from '../editor/panels/BuildPanel';
 import { MaterialLibrary } from '../editor/MaterialLibrary';
 import { SitePanel } from '../editor/panels/SitePanel';
 import { LightPanel } from '../editor/panels/LightPanel';
-import { CostPanel, CostBadge } from '../editor/panels/CostPanel';
+import { CostPanel } from '../editor/panels/CostPanel';
 import { CheckPanel, CheckBadge } from '../editor/panels/CheckPanel';
 import { PresentPanel } from '../editor/panels/PresentPanel';
 import { ReviewPanel } from '../editor/panels/ReviewPanel';
@@ -90,8 +91,17 @@ export function EditorPage() {
 
   const palette = useCommandPalette();
 
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  /*
+   * Both sidebars start closed.
+   *
+   * A plan opens on the plan. The library and the properties dock are both
+   * things you reach for once you know what you are doing next, and opening
+   * them for everyone means the first thing anybody sees is two panels and a
+   * slice of viewport. Each is one click or one shortcut away, and the widths
+   * they were dragged to are remembered, so nothing is lost by starting shut.
+   */
+  const [leftOpen, setLeftOpen] = useState(false);
+  const [rightOpen, setRightOpen] = useState(false);
   /*
    * The templates drawer starts closed. It used to be a permanent band across
    * the bottom, which cost 170 px of plan for something most people open twice
@@ -304,7 +314,11 @@ export function EditorPage() {
           />
         </div>
 
-        {rightOpen ? <PropertiesDock onClose={() => setRightOpen(false)} /> : null}
+        {rightOpen ? (
+          <PropertiesDock onClose={() => setRightOpen(false)} />
+        ) : (
+          <PropertiesTab onOpen={() => setRightOpen(true)} />
+        )}
       </div>
 
       <CommandPalette open={palette.open} onClose={() => palette.setOpen(false)} />
@@ -365,6 +379,40 @@ function StudioStage() {
  * active and neither has anywhere else to live — and while you are drawing a
  * wall, the catalogue is not what you want on screen anyway.
  */
+/**
+ * The closed properties dock, as a tab on the right edge.
+ *
+ * With the dock shut there was no sign it existed — the only way back was a
+ * toolbar button in the far corner or a shortcut, neither of which says what
+ * it opens. A labelled tab on the edge it belongs to is the standard answer:
+ * it names the panel, sits exactly where the panel will appear, and reads as
+ * something to pull open.
+ *
+ * The label runs downward because the tab is tall and narrow. `writing-mode`
+ * with `sideways-rl` keeps the letters upright relative to the reader as they
+ * descend, which is the legible orientation; plain `vertical-rl` lays them on
+ * their side and is noticeably harder to read at this size.
+ */
+function PropertiesTab({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title="Open properties (Ctrl+.)"
+      aria-label="Open the properties panel"
+      className="ed-panel group flex w-8 shrink-0 cursor-pointer flex-col items-center gap-2 border-l border-line py-3 text-ink-muted transition hover:bg-surface-muted hover:text-ink"
+    >
+      <Sliders className="h-4 w-4 shrink-0" />
+      <span
+        className="text-[11px] font-semibold tracking-wide"
+        style={{ writingMode: 'sideways-rl' }}
+      >
+        Properties
+      </span>
+    </button>
+  );
+}
+
 function WorkPanelHost({ onClose }: { onClose: () => void }) {
   const workPanel = useEditor((s) => s.workPanel);
   const tool = useEditor((s) => s.tool);
@@ -578,10 +626,11 @@ function StudioTopBar({
 
       <div className="ml-auto flex shrink-0 items-center gap-1">
         {/*
-          The two numbers a planner glances at constantly: what it costs and
-          whether it passes. Both open their panel when clicked.
+          Checks stay here because a failing plan is something you need to know
+          about without asking. Cost does not: it belongs in the Cost section,
+          where the figure sits next to what makes it up, rather than as a
+          number in the chrome that invites reading without its context.
         */}
-        <CostBadge />
         <CheckBadge />
         <span className="mx-1 h-5 w-px bg-line" aria-hidden />
 
@@ -680,9 +729,16 @@ function useKeyboardShortcuts(
       if (target?.isContentEditable) return;
 
       const s = useEditor.getState();
-      // Right-click fly navigation owns the keyboard while it is held — 's'
-      // moving the camera backward must not also toggle snap.
-      if (s.flying) return;
+      /*
+       * Camera navigation owns the keyboard while it is active.
+       *
+       * Held-button flying and walk mode both give W A S D Q E to the camera,
+       * and those letters are otherwise scale, snap and the transform modes —
+       * so 's' moving the camera backward must not also toggle snapping.
+       * Standing the shortcuts down for the duration is what lets the same
+       * keys mean two things without either one surprising anybody.
+       */
+      if (s.flying || s.walkMode) return;
       const mod = e.ctrlKey || e.metaKey;
 
       if (mod && e.key.toLowerCase() === 's') {

@@ -244,6 +244,23 @@ interface EditorState {
   flying: boolean;
   setFlying: (flying: boolean) => void;
 
+  /**
+   * Walk mode: W A S D Q E drive the camera on their own.
+   *
+   * Held-button flying is the convention every renderer uses, and it exists
+   * because those six keys are not free — E is scale, S is snap, R is rotate.
+   * Making them move the camera *all* the time would silently break the
+   * transform shortcuts, so instead this is a mode: while it is on the camera
+   * keys are the camera's and the conflicting shortcuts stand down; while it
+   * is off nothing changes. Blender, Godot and Unreal all resolve it this way
+   * rather than by asking the user to hold a modifier forever.
+   *
+   * Escape leaves, which is what every modal navigation does.
+   */
+  walkMode: boolean;
+  setWalkMode: (walk: boolean) => void;
+  toggleWalkMode: () => void;
+
   /* ── Saved views ──────────────────────────────────────────────────────
    * Named camera positions the designer keeps so a client can navigate the
    * scene without knowing how to orbit one. The request counter is how the
@@ -553,6 +570,10 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   flying: false,
   setFlying: (flying) => set({ flying }),
+
+  walkMode: false,
+  setWalkMode: (walkMode) => set({ walkMode }),
+  toggleWalkMode: () => set((s) => ({ walkMode: !s.walkMode })),
 
   viewRequest: null,
   goToView: (view) => set({ viewRequest: { view, at: Date.now() } }),

@@ -1654,6 +1654,25 @@ function TrackpadNavigation({ orbitRef }: { orbitRef: React.MutableRefObject<any
 }
 
 const FLY_MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE']);
+
+/**
+ * Arrow keys drive the camera too, always.
+ *
+ * They are the one set of movement keys nothing else in this editor wants, so
+ * unlike WASD they need no mode and no modifier — press one and the view
+ * moves. That makes the viewport navigable the moment it is focused, with no
+ * shortcut to learn, which is what someone reaching for the arrows expects.
+ *
+ * Left and right *orbit* rather than strafe, and up and down dolly rather than
+ * fly, because that is what arrows do in every map and model viewer: they turn
+ * the view around what you are looking at instead of walking you off the plan.
+ */
+const ARROW_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+/** Radians per second of orbit, and metres per second of dolly. */
+const ARROW_ORBIT_SPEED = 1.15;
+/** World up, shared so the frame loop allocates nothing. */
+const UP_AXIS = new THREE.Vector3(0, 1, 0);
+const ARROW_DOLLY_SPEED = 0.55;
 const FLY_LOOK_SPEED = 0.0025;
 const FLY_SPEED = 6;
 const FLY_BOOST = 2.4;
@@ -1718,6 +1737,7 @@ function FlyNavigation({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
     const onPointerDown = (e: PointerEvent) => {
       // Shift+right-drag. A plain right-drag pans, because panning is the
       // move everybody needs and flying is the one experts go looking for.
+      // Walk mode is the other way in, and needs no button at all.
       if (e.button !== 2 || !e.shiftKey) return;
       e.preventDefault();
       active.current = true;
@@ -1741,10 +1761,45 @@ function FlyNavigation({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
       invalidate();
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!active.current) return;
-      if (FLY_MOVE_KEYS.has(e.code) || e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+      // Never steal a keystroke meant for a text field.
+      const target = e.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (target?.isContentEditable) return;
+      // A modified key belongs to a shortcut, not to the camera.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      const walking = useEditor.getState().walkMode;
+
+      // Escape leaves walk mode, as it does in every modal navigation.
+      if (e.code === 'Escape' && walking) {
+        e.preventDefault();
+        useEditor.getState().setWalkMode(false);
+        pressed.current.clear();
+        return;
+      }
+
+      /*
+       * The camera keys are live while a right-drag is held *or* while walk
+       * mode is on. Outside both, W A S D Q E belong to the transform
+       * shortcuts they have always belonged to.
+       */
+      if ((active.current || walking) && FLY_MOVE_KEYS.has(e.code)) {
         e.preventDefault();
         pressed.current.add(e.code);
+        // Kick the on-demand renderer, or the frame loop never starts.
+        invalidate();
+        return;
+      }
+      if ((active.current || walking) && (e.code === 'ShiftLeft' || e.code === 'ShiftRight')) {
+        pressed.current.add(e.code);
+        return;
+      }
+
+      // Arrows need no mode at all.
+      if (ARROW_KEYS.has(e.code)) {
+        e.preventDefault();
+        pressed.current.add(e.code);
+        invalidate();
       }
     };
     const onKeyUp = (e: KeyboardEvent) => pressed.current.delete(e.code);
@@ -1772,21 +1827,86 @@ function FlyNavigation({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
   }, [camera, gl, orbitRef, setFlying]);
 
   useFrame((_, delta) => {
-    if (!active.current || !pressed.current.size) return;
-    const boost = pressed.current.has('ShiftLeft') || pressed.current.has('ShiftRight') ? FLY_BOOST : 1;
-    const step = FLY_SPEED * boost * Math.min(delta, 0.1);
-
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    const move = new THREE.Vector3();
-    if (pressed.current.has('KeyW')) move.add(forward);
-    if (pressed.current.has('KeyS')) move.sub(forward);
-    if (pressed.current.has('KeyD')) move.add(right);
-    if (pressed.current.has('KeyA')) move.sub(right);
-    if (pressed.current.has('KeyE')) move.y += 1;
-    if (pressed.current.has('KeyQ')) move.y -= 1;
-    if (move.lengthSq() > 0) camera.position.addScaledVector(move.normalize(), step);
+    if (!pressed.current.size) return;
+    /*
+     * Keep the frames coming while a key is held.
+     *
+     * The viewport renders on demand, and a held key fires exactly one
+     * keydown — so without asking for the next frame here the camera moved a
+     * single step and stopped, which looked like the key doing nothing at
+     * all. Requesting a frame at the top of the loop, before any early
+     * return, is what turns a held key into continuous motion.
+     */
     invalidate();
+
+    const walking = useEditor.getState().walkMode;
+    const controls = orbitRef.current;
+    const clamped = Math.min(delta, 0.1);
+    const boost = pressed.current.has('ShiftLeft') || pressed.current.has('ShiftRight') ? FLY_BOOST : 1;
+    let moved = false;
+
+    /* ── W A S D Q E: walk the camera ──────────────────────────────── */
+    if (active.current || walking) {
+      const step = FLY_SPEED * boost * clamped;
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+      const move = new THREE.Vector3();
+      if (pressed.current.has('KeyW')) move.add(forward);
+      if (pressed.current.has('KeyS')) move.sub(forward);
+      if (pressed.current.has('KeyD')) move.add(right);
+      if (pressed.current.has('KeyA')) move.sub(right);
+      if (pressed.current.has('KeyE')) move.y += 1;
+      if (pressed.current.has('KeyQ')) move.y -= 1;
+      if (move.lengthSq() > 0) {
+        move.normalize().multiplyScalar(step);
+        camera.position.add(move);
+        /*
+         * Walking without a held button leaves OrbitControls in charge, and it
+         * will drag the camera back to its own idea of where it should be on
+         * the next update unless the target travels with it. Held-button
+         * flying disables the controls instead, so this only applies to walk
+         * mode.
+         */
+        if (walking && !active.current && controls) controls.target.add(move);
+        moved = true;
+      }
+    }
+
+    /* ── Arrows: orbit and dolly, no mode required ─────────────────── */
+    if (controls) {
+      const target = controls.target as THREE.Vector3;
+      const offset = camera.position.clone().sub(target);
+      let changed = false;
+
+      const yaw = (pressed.current.has('ArrowLeft') ? 1 : 0) - (pressed.current.has('ArrowRight') ? 1 : 0);
+      if (yaw !== 0) {
+        // Turn around the target, which is what an arrow means in a viewer.
+        offset.applyAxisAngle(UP_AXIS, yaw * ARROW_ORBIT_SPEED * boost * clamped);
+        changed = true;
+      }
+
+      const dolly = (pressed.current.has('ArrowUp') ? 1 : 0) - (pressed.current.has('ArrowDown') ? 1 : 0);
+      if (dolly !== 0) {
+        // Proportional, so one press covers the same fraction of the distance
+        // whether you are inspecting a chair or looking at the whole hall.
+        const factor = Math.exp(-dolly * ARROW_DOLLY_SPEED * boost * clamped);
+        const next = THREE.MathUtils.clamp(
+          offset.length() * factor,
+          controls.minDistance ?? 0.4,
+          controls.maxDistance ?? 400
+        );
+        offset.setLength(next);
+        changed = true;
+      }
+
+      if (changed) {
+        camera.position.copy(target).add(offset);
+        controls.update?.();
+        moved = true;
+      }
+    }
+
+    if (moved) invalidate();
   });
 
   return null;
@@ -2418,8 +2538,10 @@ const NAV_GROUPS: Array<{ heading: string; rows: Array<[string, string]> }> = [
     ],
   },
   {
-    heading: 'Anywhere',
+    heading: 'Keyboard',
     rows: [
+      ['Arrow keys', 'Turn and move in — no mode needed'],
+      ['Walk button', 'W A S D to move, Q E down and up, Esc leaves'],
       ['Double-click', 'Go to that object'],
       ['F', 'Frame the selection'],
       ['Ctrl+A', 'Select everything'],

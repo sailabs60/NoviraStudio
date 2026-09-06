@@ -1,4 +1,4 @@
-import { Move, RotateCw, Scaling } from 'lucide-react';
+import { Footprints, Move, RotateCw, Scaling } from 'lucide-react';
 import { useEditor } from './editorStore';
 import { useSelectedObjects } from './selectors';
 
@@ -34,6 +34,8 @@ export function TransformRail() {
   const transformMode = useEditor((s) => s.transformMode);
   const setTransformMode = useEditor((s) => s.setTransformMode);
   const tool = useEditor((s) => s.tool);
+  const walkMode = useEditor((s) => s.walkMode);
+  const toggleWalkMode = useEditor((s) => s.toggleWalkMode);
 
   // Drafting has its own interaction; a transform mode there means nothing.
   if (readOnly || tool === 'draw' || tool === 'wall') return null;
@@ -46,7 +48,7 @@ export function TransformRail() {
    * quietly greyed. It also keeps the mode visible, which is worth knowing
    * before you select something.
    */
-  const idle = selected.length === 0;
+  const idle = selected.length === 0 && !walkMode;
 
   return (
     <div
@@ -75,6 +77,36 @@ export function TransformRail() {
           </button>
         );
       })}
+
+      {/*
+        Walk mode, added under the three modes rather than among them: it is
+        about moving the camera, not about what a drag does to an object.
+
+        It exists because W A S D Q E are already scale, snap and the transform
+        modes, so making them drive the camera all the time would silently
+        break those. As a mode the same keys mean two things without either
+        surprising anybody — the arrangement Blender, Godot and Unreal all
+        settled on — and while it is on the transform shortcuts stand down.
+      */}
+      <span aria-hidden className="mx-auto my-0.5 h-px w-6 bg-line" />
+      <button
+        type="button"
+        title={
+          walkMode
+            ? 'Stop walking (Esc). W A S D move, Q E drop and rise, Shift is faster'
+            : 'Walk with W A S D (Q E for down and up). Esc leaves.'
+        }
+        aria-pressed={walkMode}
+        onClick={toggleWalkMode}
+        className={`flex h-9 w-9 items-center justify-center rounded-lg transition ${
+          walkMode
+            ? 'bg-primary text-primary-fg shadow-sm'
+            : 'text-ink-muted hover:bg-surface-muted hover:text-ink'
+        }`}
+      >
+        <Footprints className="h-4 w-4" />
+        <span className="sr-only">Walk</span>
+      </button>
     </div>
   );
 }
