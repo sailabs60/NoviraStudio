@@ -69,6 +69,19 @@ export function buildSnapshot(): SceneSnapshot {
     })),
     groups: summariseGroups(scene.objects),
     selection: describeSelection(scene.objects, state.selectedIds),
+    // Intent, which geometry cannot supply.
+    ...(scene.designBrief
+      ? {
+          designBrief: {
+            prompt: scene.designBrief.prompt.slice(0, 600),
+            eventKind: scene.designBrief.eventKind,
+            attendance: scene.designBrief.attendance,
+            seating: scene.designBrief.seating,
+            summary: scene.designBrief.summary.slice(0, 12),
+            paletteHex: scene.designBrief.paletteHex,
+          },
+        }
+      : {}),
   };
 }
 

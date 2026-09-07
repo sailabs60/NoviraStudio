@@ -306,6 +306,16 @@ const snapshotSchema = z.object({
    * next sentence is about — "make this 5 metres wide" needs it to mean
    * anything at all.
    */
+  designBrief: z
+    .object({
+      prompt: z.string().max(1000),
+      eventKind: z.string().max(40),
+      attendance: z.number(),
+      seating: z.string().max(40),
+      summary: z.array(z.string().max(300)).max(12),
+      paletteHex: z.array(z.string().max(16)).max(6),
+    })
+    .optional(),
   selection: z
     .object({
       count: z.number(),

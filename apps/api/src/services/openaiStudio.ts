@@ -249,6 +249,15 @@ export interface SceneSnapshot {
    * because an instruction containing "this" or "these" cannot be answered
    * without it.
    */
+  /** What the plan was designed to be. Intent, which geometry cannot supply. */
+  designBrief?: {
+    prompt: string;
+    eventKind: string;
+    attendance: number;
+    seating: string;
+    summary: string[];
+    paletteHex: string[];
+  };
   selection?: {
     count: number;
     ids: string[];
@@ -362,6 +371,10 @@ const AGENT_SYSTEM = [
   'Use ids exactly as they appear in the snapshot. Propose no operations at all if the user only asked a',
   'question — an answer is a complete response. Never propose deleting more than the user asked for.',
   '',
+  '`designBrief`, when present, is what this plan was built to be. Use it: "add a VIP area" and "make',
+  'the lighting warmer" mean different things at a technology conference and a wedding, and the palette',
+  'there is the brand palette to match when adding anything that carries colour.',
+  '',
   'When `selection` is present the user has something highlighted, and a sentence containing "this",',
   '"these", "it" or "them" almost certainly means that. Act on the selected ids rather than searching the',
   'sample for something with a matching name.',
@@ -390,6 +403,7 @@ function snapshotForModel(snapshot: SceneSnapshot): string {
     roomDepthMm: snapshot.roomDepthMm,
     groups: snapshot.groups ?? [],
     selection: snapshot.selection,
+    designBrief: snapshot.designBrief,
   };
 
   const headJson = JSON.stringify(head);

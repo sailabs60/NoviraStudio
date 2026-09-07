@@ -115,6 +115,22 @@ export interface SceneSnapshot {
    * rotation, scale, materials and group membership, because that is the object
    * the next instruction is almost certainly about.
    */
+  /**
+   * What this plan was designed to be, when it was generated from a brief.
+   *
+   * The object list says what is in the room; this says what the room is for.
+   * "Add a VIP area" and "make the lighting warmer" are answered very
+   * differently for a technology conference and a wedding, and no amount of
+   * measuring 48 round tables distinguishes the two.
+   */
+  designBrief?: {
+    prompt: string;
+    eventKind: string;
+    attendance: number;
+    seating: string;
+    summary: string[];
+    paletteHex: string[];
+  };
   selection?: {
     count: number;
     /** The whole set when several are selected, so "delete these" works. */
