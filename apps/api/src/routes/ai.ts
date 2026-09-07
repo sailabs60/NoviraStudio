@@ -395,6 +395,26 @@ aiRouter.post(
       },
     });
 
-    res.status(201).json({ id: Number(item.id), name: item.name, scope: item.scope });
+    /*
+     * Return the item as saved, not just its id.
+     *
+     * The scaling happens here — the stated height is applied to the measured
+     * mesh and the width and depth follow — so those figures exist nowhere
+     * else. A caller that wants to place the object immediately would
+     * otherwise have to fetch it straight back to learn how big it now is.
+     */
+    res.status(201).json({
+      id: Number(item.id),
+      name: item.name,
+      scope: item.scope,
+      item: {
+        id: Number(item.id),
+        name: item.name,
+        modelUrl: item.modelUrl,
+        widthMm: item.widthMm,
+        depthMm: item.depthMm,
+        heightMm: item.heightMm,
+      },
+    });
   })
 );

@@ -17,6 +17,7 @@
  * is how a product ends up with two credit systems that disagree.
  */
 import { Router } from 'express';
+import path from 'node:path';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { ApiError } from '../lib/errors.js';
@@ -24,6 +25,8 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { requireAuth } from '../middleware/auth.js';
 import { assertFeature } from '../services/access.js';
 import { jobDto, registerHandler, startJob, type JobContext } from '../services/jobs.js';
+import { inspectGltfFile, inferScale } from '../services/gltfInspect.js';
+import { env } from '../lib/env.js';
 import {
   adopt,
   generationStatuses,
@@ -488,13 +491,55 @@ registerHandler('ai_text_to_3d', async (ctx) => {
   await ctx.report(94);
 
   const stored = await adopt(finished, 'generated/models');
+
+  /*
+   * Measure it.
+   *
+   * A generated mesh has no inherent real-world size — the provider returns
+   * whatever the model happened to produce, and it is routinely metres off in
+   * either direction. Without dimensions the only thing the editor can do is
+   * drop it in at an arbitrary scale, which is exactly what makes generated
+   * content feel like a toy in a plan measured in millimetres.
+   *
+   * Reporting the measured extents lets the caller offer a real height, and
+   * lets the panel default that height to something sensible for the kind of
+   * thing it is. Image-to-3D already did this; text-to-3D did not, and that
+   * asymmetry had no reason behind it.
+   */
+  const facts = await measureStoredModel(stored.url);
+
   return {
     modelUrl: stored.url,
     thumbnailUrl: stored.thumbnailUrl,
     refinedPrompt: prompt,
     providerTaskId: taskId,
+    ...facts,
   };
 });
+
+/**
+ * Read a stored model's real extents, in millimetres.
+ *
+ * Returns empty rather than throwing: a mesh that cannot be inspected is
+ * still a usable model, and losing the whole generation over a measurement is
+ * the wrong trade. The caller falls back to asking for a height.
+ */
+async function measureStoredModel(url: string | null): Promise<Record<string, number>> {
+  try {
+    const relative = url?.split('/static/assets/')[1];
+    if (!relative) return {};
+    const facts = await inspectGltfFile(path.join(env.assetDir, relative));
+    const scale = inferScale(facts);
+    return {
+      triangleCount: facts.triangleCount,
+      detectedWidthMm: scale.sizeMm.width,
+      detectedHeightMm: scale.sizeMm.height,
+      detectedDepthMm: scale.sizeMm.depth,
+    };
+  } catch {
+    return {};
+  }
+}
 
 /*
  * `ai_image_to_3d` is deliberately *not* registered here.

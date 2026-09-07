@@ -108,6 +108,40 @@ export const studio = {
     idempotencyKey?: string;
   }) => http.post<AiJobLike>('/ai/studio/mockup', body).then((r) => r.data),
 
+  /**
+   * Turn a finished generation into a real catalogue item.
+   *
+   * The height is the point of this call. A generated mesh has no inherent
+   * size, so the catalogue records the one the operator states and scales the
+   * measured width and depth to match — which is what lets a generated object
+   * sit in a plan drawn in millimetres rather than at an arbitrary scale.
+   */
+  saveToCatalog: (body: {
+    jobId: string;
+    name: string;
+    description: string;
+    categorySlug: string;
+    targetHeightMm: number;
+    scope?: 'personal' | 'company' | 'global';
+  }) =>
+    http
+      .post<{
+        id: number;
+        name: string;
+        item?: {
+          id: number;
+          name: string;
+          modelUrl: string | null;
+          widthMm: number | null;
+          depthMm: number | null;
+          heightMm: number | null;
+        };
+      }>('/ai/save-to-catalog', body)
+      .then((r) => r.data),
+
+  /** Stop a running generation and refund it. */
+  cancel: (id: string) => http.post<AiJobLike>(`/ai/jobs/${id}/cancel`).then((r) => r.data),
+
   creations: () => http.get<{ items: Creation[] }>('/ai/studio/creations').then((r) => r.data.items),
 
   removeCreation: (id: string) => http.delete(`/ai/studio/creations/${id}`).then((r) => r.data),

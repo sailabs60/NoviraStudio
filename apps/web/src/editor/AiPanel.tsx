@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, Eye, EyeOff, Library, Loader2, Lock, Sparkles, Upload, X } from 'lucide-react';
+import { Download, Eye, EyeOff, Library, Loader2, Lock, Sparkles, Upload, Wand2, X } from 'lucide-react';
 import { AiProgress } from '../components/AiProgress';
+import { AiCreate } from './AiCreate';
 import { http, ApiClientError } from '../lib/api';
 import { useEditor } from './editorStore';
 import { captureViewport } from './capture';
@@ -168,13 +169,34 @@ export function AiPanel() {
   const enhanceCap = capabilities?.ai_enhance;
   const to3dCap = capabilities?.ai_image_to_3d;
   const running = job && (job.status === 'queued' || job.status === 'in_progress');
+  const [createOpen, setCreateOpen] = useState(false);
 
   return (
     <>
+      {/*
+        Two AI doors, side by side, because they are different jobs.
+
+        "Create" makes an object that does not exist yet and puts it in the
+        room. "Enhance" photographs the room as it stands. Putting them
+        together makes the choice obvious; the generator used to be on a
+        separate page, which is most of why nobody found it.
+      */}
+      <button
+        type="button"
+        className="ed-action"
+        disabled={readOnly}
+        title="Describe an object and place it in the plan"
+        onClick={() => setCreateOpen(true)}
+      >
+        <Wand2 className="h-3.5 w-3.5" /> Create
+      </button>
+
       <button type="button" className="ed-action-primary" disabled={readOnly}
         onClick={() => { setOpen('enhance'); setJob(null); setError(null); }}>
         <Sparkles className="h-3.5 w-3.5" /> AI Enhance
       </button>
+
+      {createOpen ? <AiCreate onClose={() => setCreateOpen(false)} /> : null}
 
       {/* Render overlay, toggled against the live viewport. */}
       {render ? (
