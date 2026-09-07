@@ -122,17 +122,23 @@ export function layoutDining(opts: {
   const wanted = Math.ceil(opts.attendance / seatsPerTable);
 
   const columns = Math.max(1, Math.floor(opts.widthMm / pitchMm));
+
   /*
-   * How many rows to *try*.
+   * How many rows to try — and never more than the region holds.
    *
    * `wanted / columns` is the answer only if every slot is free, and slots
-   * rarely are — a walkway takes a column out of every row, a dance floor
-   * takes a block out of the middle. Stopping at the ideal row count leaves
-   * the back of the region empty while tables go unplaced. So the grid is
-   * walked as deep as the region allows, and the `wanted` cap stops it early
-   * once enough tables are down.
+   * rarely are: a walkway takes a column out of every row, a dance floor takes
+   * a block out of the middle. So the grid is walked as deep as the region
+   * allows and the `wanted` cap stops it early once enough tables are down.
+   *
+   * The cap is the important half. Taking the *larger* of the two figures let
+   * the ideal row count win when the region was too shallow for it, and the
+   * extra rows were laid past the region's back edge — in a 34 m room that put
+   * six tables and their chairs through the back wall. The region is the
+   * boundary; falling short of the guest count inside it is a shortfall to
+   * report, not a licence to overflow.
    */
-  const rows = Math.max(1, Math.ceil(wanted / columns), Math.floor(opts.depthMm / pitchMm));
+  const rows = Math.max(1, Math.floor(opts.depthMm / pitchMm));
 
   /*
    * Centre the grid across the room, but start it at the front of the region.

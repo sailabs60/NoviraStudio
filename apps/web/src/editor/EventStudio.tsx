@@ -23,7 +23,7 @@
  * things nobody could use. The panel is wide enough to read a plan in and
  * dismissible at any point without losing the work.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -31,6 +31,7 @@ import {
   Check,
   Loader2,
   Package,
+  Ruler,
   Sparkles,
   Wand2,
   X,
@@ -50,6 +51,14 @@ import { spatial } from '../lib/spatialApi';
 import { toast } from '../components/ui';
 
 type Stage = 'concept' | 'plan' | 'assets' | 'build';
+
+/** The room already in the plan, measured from its walls. */
+interface Venue {
+  widthMm: number;
+  depthMm: number;
+  /** 0 when the walls do not say. */
+  heightMm: number;
+}
 
 const STAGES: Array<{ id: Stage; label: string; note: string }> = [
   { id: 'concept', label: 'Concept', note: 'What you want' },
@@ -103,13 +112,58 @@ export function EventStudio({ onClose }: { onClose: () => void }) {
 
   const catalogue: Catalogue = useMemo(() => ({ items: catalogueItems ?? [] }), [catalogueItems]);
 
+
+  /*
+   * The room the event is actually going into.
+   *
+   * If a venue is already loaded — walls drawn, or a venue shell placed — the
+   * layout has to be planned for *that* room, not for a room derived from the
+   * guest count. Deriving one anyway is how a plan comes out physically
+   * impossible in the space it was made for: the right number of tables, in a
+   * room the client does not have.
+   */
+  const venue = useMemo(() => {
+    const segments = scene.walls.segments;
+    if (segments.length < 3) return null;
+
+    const xs = segments.flatMap((s) => [s.start.xMm, s.end.xMm]);
+    const zs = segments.flatMap((s) => [s.start.zMm, s.end.zMm]);
+    const widthMm = Math.round(Math.max(...xs) - Math.min(...xs));
+    const depthMm = Math.round(Math.max(...zs) - Math.min(...zs));
+    if (widthMm < 3000 || depthMm < 3000) return null;
+
+    // Ceiling from the tallest wall, which is what the walls were built at.
+    const heightMm = Math.round(Math.max(...segments.map((s) => s.heightMm || 0))) || 0;
+    return { widthMm, depthMm, heightMm: heightMm > 2000 ? heightMm : 0 };
+  }, [scene.walls.segments]);
+  /*
+   * Do not redraw a room that already exists.
+   *
+   * Replacing the walls of a venue someone has drawn — or that came from a
+   * measured venue model — with a generated box is destructive and almost
+   * never what was wanted. The toggle stays available, because a room drawn
+   * as a placeholder is a real case, but it defaults off once there is
+   * something to lose.
+   */
+  useEffect(() => {
+    if (venue) setBuildWalls(false);
+  }, [venue]);
+
   /** The free path: parse locally. Instant, no credits, and usually right. */
   const readLocally = (text: string) => {
     if (!text.trim()) {
       setConcept(null);
       return;
     }
-    setConcept(generateConcept(parseBrief(text)));
+    // The venue's real size wins over anything derived from the guest count.
+    const base = venue
+      ? {
+          roomWidthMm: venue.widthMm,
+          roomDepthMm: venue.depthMm,
+          ...(venue.heightMm ? { roomHeightMm: venue.heightMm } : {}),
+        }
+      : {};
+    setConcept(generateConcept(parseBrief(text, base)));
     setInterpreter('parser');
   };
 
@@ -126,7 +180,16 @@ export function EventStudio({ onClose }: { onClose: () => void }) {
        * credits are spent when something is generated, not when a sentence is
        * parsed.
        */
-      const result = await spatial.ai.conceptPreview(prompt);
+      const result = await spatial.ai.conceptPreview(
+        prompt,
+        venue
+          ? {
+              roomWidthMm: venue.widthMm,
+              roomDepthMm: venue.depthMm,
+              ...(venue.heightMm ? { roomHeightMm: venue.heightMm } : {}),
+            }
+          : {}
+      );
       setConcept(result as unknown as ConceptResult);
       setInterpreter('model');
       setStage('plan');
@@ -353,6 +416,7 @@ export function EventStudio({ onClose }: { onClose: () => void }) {
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
           {stage === 'concept' ? (
             <ConceptStage
+              venue={venue}
               prompt={prompt}
               setPrompt={(text) => {
                 setPrompt(text);
@@ -366,7 +430,12 @@ export function EventStudio({ onClose }: { onClose: () => void }) {
           ) : null}
 
           {stage === 'plan' && concept ? (
-            <PlanStage concept={concept} interpreter={interpreter} onNext={() => setStage('assets')} />
+            <PlanStage
+              concept={concept}
+              interpreter={interpreter}
+              venue={venue}
+              onNext={() => setStage('assets')}
+            />
           ) : null}
 
           {stage === 'assets' && concept ? (
@@ -381,6 +450,7 @@ export function EventStudio({ onClose }: { onClose: () => void }) {
           {stage === 'build' && concept ? (
             <BuildStage
               concept={concept}
+              venue={venue}
               buildWalls={buildWalls}
               setBuildWalls={setBuildWalls}
               replaceExisting={replaceExisting}
@@ -399,6 +469,7 @@ export function EventStudio({ onClose }: { onClose: () => void }) {
 /* ── Stage 1: the concept ──────────────────────────────────────────────── */
 
 function ConceptStage({
+  venue,
   prompt,
   setPrompt,
   concept,
@@ -406,6 +477,7 @@ function ConceptStage({
   onReadWithModel,
   onNext,
 }: {
+  venue: Venue | null;
   prompt: string;
   setPrompt: (text: string) => void;
   concept: ConceptResult | null;
@@ -422,6 +494,23 @@ function ConceptStage({
           worked out from what you did say.
         </p>
       </div>
+
+      {/*
+        Say up front which room this is being planned for. A layout that fits a
+        derived room and not the one on screen is the failure this prevents, and
+        it is much cheaper to notice here than after 500 objects are placed.
+      */}
+      {venue ? (
+        <div className="flex items-start gap-2 rounded border border-line bg-surface-sunken px-2.5 py-2">
+          <Ruler className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+          <p className="text-[11px] leading-snug text-ink">
+            Planning for the room already here — {(venue.widthMm / 1000).toFixed(1)} ×{' '}
+            {(venue.depthMm / 1000).toFixed(1)} m
+            {venue.heightMm ? `, ${(venue.heightMm / 1000).toFixed(1)} m to the ceiling` : ''}.{' '}
+            <span className="text-ink-muted">Everything is laid out to fit it.</span>
+          </p>
+        </div>
+      ) : null}
 
       <textarea
         value={prompt}
@@ -490,10 +579,12 @@ function ConceptStage({
 function PlanStage({
   concept,
   interpreter,
+  venue,
   onNext,
 }: {
   concept: ConceptResult;
   interpreter: 'model' | 'parser';
+  venue: Venue | null;
   onNext: () => void;
 }) {
   const grouped = useMemo(() => {
@@ -515,6 +606,7 @@ function PlanStage({
           {(concept.roomHeightMm / 1000).toFixed(1)} m to the ceiling
         </p>
         <p className="mt-0.5 text-[10px] text-ink-muted">
+          {venue ? 'Measured from the room already in this plan. ' : ''}
           {interpreter === 'model' ? 'A model read your description; ' : 'Read by the built-in parser; '}
           every dimension was then calculated, not generated.
         </p>
@@ -658,6 +750,7 @@ function AssetStage({
 
 function BuildStage({
   concept,
+  venue,
   buildWalls,
   setBuildWalls,
   replaceExisting,
@@ -667,6 +760,7 @@ function BuildStage({
   onBuild,
 }: {
   concept: ConceptResult;
+  venue: Venue | null;
   buildWalls: boolean;
   setBuildWalls: (value: boolean) => void;
   replaceExisting: boolean;
@@ -703,10 +797,13 @@ function BuildStage({
       <label className="flex cursor-pointer items-start gap-2 rounded border border-line px-2.5 py-2">
         <input type="checkbox" checked={buildWalls} onChange={(e) => setBuildWalls(e.target.checked)} className="mt-0.5" />
         <span className="min-w-0">
-          <span className="block text-[11px] font-semibold text-ink">Build the room</span>
+          <span className="block text-[11px] font-semibold text-ink">
+            {venue ? 'Redraw the room' : 'Build the room'}
+          </span>
           <span className="block text-[10px] leading-snug text-ink-muted">
-            Draws walls and a floor at {(concept.roomWidthMm / 1000).toFixed(1)} ×{' '}
-            {(concept.roomDepthMm / 1000).toFixed(1)} m.
+            {venue
+              ? `This plan already has a ${(venue.widthMm / 1000).toFixed(1)} × ${(venue.depthMm / 1000).toFixed(1)} m room, and the layout is built to fit it. Leave this off to keep the walls you have.`
+              : `Draws walls and a floor at ${(concept.roomWidthMm / 1000).toFixed(1)} × ${(concept.roomDepthMm / 1000).toFixed(1)} m.`}
           </span>
         </span>
       </label>
