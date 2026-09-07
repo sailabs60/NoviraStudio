@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, Eye, EyeOff, Library, Loader2, Lock, Sparkles, Upload, Wand2, X } from 'lucide-react';
+import { Download, Eye, EyeOff, LayoutDashboard, Library, Loader2, Lock, Sparkles, Upload, Wand2, X } from 'lucide-react';
 import { AiProgress } from '../components/AiProgress';
 import { AiCreate } from './AiCreate';
+import { EventStudio } from './EventStudio';
 import { http, ApiClientError } from '../lib/api';
 import { useEditor } from './editorStore';
 import { captureViewport } from './capture';
@@ -48,6 +49,7 @@ export function AiPanel() {
   const [render, setRender] = useState<string | null>(null);
   const [showRender, setShowRender] = useState(true);
   const [picking, setPicking] = useState(false);
+  const [studioOpen, setStudioOpen] = useState(false);
   const [sourceImage, setSourceImage] = useState<string | null>(null);
 
   const { data: capabilities } = useQuery({
@@ -191,12 +193,29 @@ export function AiPanel() {
         <Wand2 className="h-3.5 w-3.5" /> Create
       </button>
 
+      {/*
+        The whole-event path, next to the single-object one.
+        `Create` makes one thing; `Studio` takes a sentence and builds the room
+        it describes. They sit together because they answer the same question at
+        different scales, and a planner reaching for one often wants the other.
+      */}
+      <button
+        type="button"
+        className="ed-action"
+        disabled={readOnly}
+        title="Describe a whole event and build it in the room"
+        onClick={() => setStudioOpen(true)}
+      >
+        <LayoutDashboard className="h-3.5 w-3.5" /> Studio
+      </button>
+
       <button type="button" className="ed-action-primary" disabled={readOnly}
         onClick={() => { setOpen('enhance'); setJob(null); setError(null); }}>
         <Sparkles className="h-3.5 w-3.5" /> AI Enhance
       </button>
 
       {createOpen ? <AiCreate onClose={() => setCreateOpen(false)} /> : null}
+      {studioOpen ? <EventStudio onClose={() => setStudioOpen(false)} /> : null}
 
       {/* Render overlay, toggled against the live viewport. */}
       {render ? (
