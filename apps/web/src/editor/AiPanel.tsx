@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, Eye, EyeOff, LayoutDashboard, Library, Loader2, Lock, Sparkles, Upload, Wand2, X } from 'lucide-react';
+import { Download, Eye, EyeOff, LayoutDashboard, Library, Loader2, Lock, Palette, Sparkles, Upload, Wand2, X } from 'lucide-react';
 import { AiProgress } from '../components/AiProgress';
 import { AiCreate } from './AiCreate';
 import { EventStudio } from './EventStudio';
+import { BrandingStudio } from './BrandingStudio';
 import { http, ApiClientError } from '../lib/api';
 import { useEditor } from './editorStore';
 import { captureViewport } from './capture';
@@ -50,6 +51,7 @@ export function AiPanel() {
   const [showRender, setShowRender] = useState(true);
   const [picking, setPicking] = useState(false);
   const [studioOpen, setStudioOpen] = useState(false);
+  const [brandingOpen, setBrandingOpen] = useState(false);
   const [sourceImage, setSourceImage] = useState<string | null>(null);
 
   const { data: capabilities } = useQuery({
@@ -209,6 +211,22 @@ export function AiPanel() {
         <LayoutDashboard className="h-3.5 w-3.5" /> Studio
       </button>
 
+      {/*
+        Branding, beside the two generators.
+        An event is not finished when the furniture is in — the client sees the
+        logo first — and this is where the artwork is made and put on the
+        surfaces the layout already placed.
+      */}
+      <button
+        type="button"
+        className="ed-action"
+        disabled={readOnly}
+        title="Make logos, screen content and banners, and put them on the event"
+        onClick={() => setBrandingOpen(true)}
+      >
+        <Palette className="h-3.5 w-3.5" /> Branding
+      </button>
+
       <button type="button" className="ed-action-primary" disabled={readOnly}
         onClick={() => { setOpen('enhance'); setJob(null); setError(null); }}>
         <Sparkles className="h-3.5 w-3.5" /> AI Enhance
@@ -216,6 +234,7 @@ export function AiPanel() {
 
       {createOpen ? <AiCreate onClose={() => setCreateOpen(false)} /> : null}
       {studioOpen ? <EventStudio onClose={() => setStudioOpen(false)} /> : null}
+      {brandingOpen ? <BrandingStudio onClose={() => setBrandingOpen(false)} /> : null}
 
       {/* Render overlay, toggled against the live viewport. */}
       {render ? (

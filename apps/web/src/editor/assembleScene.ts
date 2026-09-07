@@ -33,6 +33,7 @@
  * is still placed — as a procedural fixture or a correctly-sized shape — so a
  * plan never silently loses a piece of the event it promised.
  */
+import { DEFAULT_ARTWORK } from '@novira/shared';
 import type {
   CatalogItemDto,
   CatalogSceneObject,
@@ -515,14 +516,37 @@ export function assembleScene(concept: ConceptResult, catalogue: Catalogue): Ass
             })
           );
         } else {
-          note('No banner model in the catalogue; branding placed as coloured panels.');
-          objects.push(
-            shapeObject(element, 'branding', {
-              fillColor: params.colorHex ?? '#0B5FFF',
-              extrudeMm: element.heightMm,
-              opacity: 1,
-            })
-          );
+          /*
+           * A real artwork panel, not a coloured box.
+           *
+           * Branding is the thing a client looks at first, and a blue rectangle
+           * says nothing about whether their logo fits. An artwork object is a
+           * printed panel with a substrate, a finish and an image slot, so the
+           * moment a logo exists it goes straight onto these — which is what
+           * "change all the branding to this logo" has to act on.
+           */
+          objects.push({
+            ...DEFAULT_ARTWORK,
+            id: newId(),
+            type: 'artwork',
+            name: element.label,
+            positionMm: { x: element.xMm, y: 0, z: element.zMm },
+            rotationDeg: { x: 0, y: element.rotationDeg, z: 0 },
+            scale: { x: 1, y: 1, z: 1 },
+            widthMm: element.widthMm,
+            heightMm: element.heightMm,
+            aspectRatio: element.widthMm / Math.max(1, element.heightMm),
+            // A banner: it stands on the floor against a wall rather than
+            // being fixed to one, which is how these are actually rigged.
+            mount: 'banner',
+            lockAspect: false,
+            material: {
+              ...DEFAULT_ARTWORK.material,
+              color: params.colorHex ?? '#0B5FFF',
+            },
+            assemblyRole: 'branding',
+            assemblyElement: 'banner',
+          } as unknown as SceneObject);
         }
         break;
       }
