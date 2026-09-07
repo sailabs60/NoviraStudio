@@ -519,10 +519,25 @@ async function apply(operation: AgentOperation): Promise<string | null> {
             depth: item.depthMm ?? 600,
             height: item.heightMm ?? 600,
           };
-          // The old name described the old model, so it would lie afterwards.
-          patch.name = operation.name ?? item.name;
-        } else if (operation.name) {
-          patch.name = operation.name;
+        }
+
+        /*
+         * Keep the name that says *where* this is, and only swap what it is.
+         *
+         * Generated objects are named for their place — "Table 12 chair 7" —
+         * and that is the only handle anyone has on one of 480 chairs. Setting
+         * every one of them to the catalogue name made the whole set
+         * indistinguishable and unfindable, which is exactly the addressability
+         * the plan is supposed to guarantee. So a positional name keeps its
+         * position and takes the new model's name after it; a plain one is
+         * simply replaced.
+         */
+        const replacement = operation.name ?? item?.name;
+        if (replacement) {
+          const current = object.name ?? '';
+          const place = /^(.*?)(?:\s+—\s+.*)?$/.exec(current)?.[1]?.trim();
+          const positional = Boolean(place) && /\d/.test(place!);
+          patch.name = positional ? `${place} — ${replacement}` : replacement;
         }
         editor.updateObject(object.id, patch as Partial<SceneObject>);
       }

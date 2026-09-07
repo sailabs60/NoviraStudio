@@ -11,6 +11,7 @@ import { useEditor } from './editorStore';
 import { useSelectedObjects } from './selectors';
 import { partsOfObject } from './picking';
 import { PropertiesPanel } from './PropertiesPanel';
+import { SceneTree } from './SceneTree';
 import { useDrag } from './dragStore';
 
 /**
@@ -35,7 +36,7 @@ import { useDrag } from './dragStore';
  */
 export function PropertiesDock({ onClose }: { onClose?: () => void }) {
   const selected = useSelectedObjects();
-  const [tab, setTab] = useState<'properties' | 'simulation'>('simulation');
+  const [tab, setTab] = useState<'properties' | 'scene' | 'simulation'>('simulation');
 
   // Follow the selection. Selecting something is an unambiguous request to see
   // its properties; deselecting everything leaves the tab alone, because
@@ -92,6 +93,19 @@ export function PropertiesDock({ onClose }: { onClose?: () => void }) {
               </span>
             ) : null}
           </button>
+          {/*
+            The scene tree, beside the other two rather than instead of either.
+            A generated event is several hundred objects and the viewport is the
+            only way to reach one of them; "chair 17 of table 12" is findable
+            here and nowhere else.
+          */}
+          <button
+            type="button"
+            onClick={() => setTab('scene')}
+            className={`ed-segment-btn flex-1 ${tab === 'scene' ? 'ed-segment-btn-active' : ''}`}
+          >
+            Scene
+          </button>
           <button
             type="button"
             onClick={() => setTab('simulation')}
@@ -102,20 +116,30 @@ export function PropertiesDock({ onClose }: { onClose?: () => void }) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === 'properties' ? (
-          selected.length === 0 ? (
-            <NothingSelected />
+      {/*
+        The scene tree scrolls itself, because it has its own search box that
+        has to stay put while the list moves under it.
+      */}
+      {tab === 'scene' ? (
+        <div className="flex min-h-0 flex-1 flex-col pt-2">
+          <SceneTree />
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {tab === 'properties' ? (
+            selected.length === 0 ? (
+              <NothingSelected />
+            ) : (
+              <>
+                <PropertiesPanel />
+                {selected.length === 1 ? <FinishesSection objectId={selected[0]!.id} /> : null}
+              </>
+            )
           ) : (
-            <>
-              <PropertiesPanel />
-              {selected.length === 1 ? <FinishesSection objectId={selected[0]!.id} /> : null}
-            </>
-          )
-        ) : (
-          <SimulationTab />
-        )}
-      </div>
+            <SimulationTab />
+          )}
+        </div>
+      )}
     </aside>
     </>
   );

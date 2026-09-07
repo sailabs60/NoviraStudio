@@ -107,10 +107,23 @@ function SwapModel({ object, onDone }: { object: CatalogSceneObject; onDone: () 
   const swap = (item: CatalogItemDto) => {
     cacheItems([item]);
 
+    /*
+     * Keep a positional name, and take the new model's name after it.
+     *
+     * "Table 12 chair 7" is the only handle anyone has on one of 480 chairs;
+     * overwriting it with the catalogue name makes the whole set
+     * indistinguishable and unfindable in the scene tree. A plain name is
+     * simply replaced.
+     */
+    const naming = (target: SceneObject): string => {
+      const current = target.name ?? '';
+      const place = /^(.*?)(?:\s+—\s+.*)?$/.exec(current)?.[1]?.trim();
+      return place && /\d/.test(place) ? `${place} — ${item.name}` : item.name;
+    };
+
     const patch: Partial<SceneObject> = {
       catalogItemId: item.id,
       modelUrl: item.modelUrl ?? undefined,
-      name: item.name,
       dimensionsMm: {
         width: item.widthMm ?? 600,
         depth: item.depthMm ?? 600,
@@ -122,7 +135,7 @@ function SwapModel({ object, onDone }: { object: CatalogSceneObject; onDone: () 
     } as Partial<SceneObject>;
 
     const targets = alsoGroup ? [object, ...peers] : [object];
-    for (const target of targets) updateObject(target.id, patch);
+    for (const target of targets) updateObject(target.id, { ...patch, name: naming(target) });
 
     toast(
       'success',
