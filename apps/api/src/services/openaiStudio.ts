@@ -263,7 +263,29 @@ export type AgentOperation =
   | { action: 'open_panel'; panel: string; note?: string }
   | { action: 'generate_3d'; prompt: string; name: string; note?: string }
   | { action: 'apply_look'; look: string; note?: string }
-  | { action: 'survey'; note: string };
+  | { action: 'survey'; note: string }
+  /*
+   * Set-wide operations.
+   *
+   * Everything above works on one object at a time, which is right for "move
+   * the lectern" and useless for "replace all the chairs" — 480 separate
+   * operations would not fit in a reply, let alone be produced reliably. These
+   * take the complete id list from a snapshot group and change the set in one
+   * step, leaving every position and relationship as it was.
+   */
+  | { action: 'nudge'; ids: string[]; deltaMm: { x: number; y: number; z: number }; note?: string }
+  | { action: 'scale'; ids: string[]; scale: { x: number; y: number; z: number }; note?: string }
+  | { action: 'resize'; id: string; dimensionsMm: { width?: number; depth?: number; height?: number }; note?: string }
+  /** Swap the catalogue model under a whole set, keeping every transform. */
+  | { action: 'replace_asset'; ids: string[]; catalogItemId: number; name?: string; note?: string }
+  /** Paint a finish across a set, by material key or `'*'` for the whole object. */
+  | { action: 'set_material'; ids: string[]; materialId: string; part?: string; note?: string }
+  /** Put an image on the surfaces of a set — LED content, banner artwork. */
+  | { action: 'set_artwork'; ids: string[]; imageUrl: string; note?: string }
+  /** Change what a light does, across a set. */
+  | { action: 'set_light'; ids: string[]; colorHex?: string; intensity?: number; note?: string }
+  /** Add more of an existing set, laid out beside what is already there. */
+  | { action: 'add_more'; likeId: string; count: number; note?: string };
 
 export interface AgentReply {
   reply: string;
@@ -298,6 +320,20 @@ const AGENT_SYSTEM = [
   '  { "action": "apply_look", "look": "corporate-summit" }',
   '  { "action": "survey", "note": "..." }',
   '',
+  'Set-wide, for whole groups. Pass every id from the group, never a sample:',
+  '  { "action": "nudge", "ids": ["..."], "deltaMm": { "x": 2000, "y": 0, "z": 0 } }',
+  '  { "action": "scale", "ids": ["..."], "scale": { "x": 1.2, "y": 1, "z": 1 } }',
+  '  { "action": "resize", "id": "...", "dimensionsMm": { "width": 14000 } }',
+  '  { "action": "replace_asset", "ids": ["..."], "catalogItemId": 42, "name": "Black banquet chair" }',
+  '  { "action": "set_material", "ids": ["..."], "materialId": "builtin:oak-natural", "part": "*" }',
+  '  { "action": "set_artwork", "ids": ["..."], "imageUrl": "https://..." }',
+  '  { "action": "set_light", "ids": ["..."], "colorHex": "#ffb26b", "intensity": 1.4 }',
+  '  { "action": "add_more", "likeId": "...", "count": 50 }',
+  '',
+  'Prefer a set-wide operation over many single ones: "move the stage 2 m forward" is one nudge, and',
+  '"replace all the chairs" is one replace_asset over every chair id — not 480 separate operations.',
+  'nudge moves by a delta from where things are, which is what a relative instruction means; move sets',
+  'an absolute position and is for one object you have the coordinates for.',
   'Use ids exactly as they appear in the snapshot. Propose no operations at all if the user only asked a',
   'question — an answer is a complete response. Never propose deleting more than the user asked for.',
   '',

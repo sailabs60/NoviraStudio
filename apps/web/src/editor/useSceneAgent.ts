@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { builtInMaterial, toFinish, type SceneObject } from '@novira/shared';
+import { builtInMaterial, toFinish, STAGE_DECK_SIZE_MM, type SceneObject } from '@novira/shared';
 import { useEditor, type WorkPanel } from './editorStore';
 import { studio, type AgentOperation, type SceneSnapshot } from '../lib/studioApi';
 import { toast } from '../components/ui';
@@ -136,6 +136,36 @@ function sizeOf(object: SceneObject) {
  * rearranges a plan is alarming; one that says "moved the Dining Chair to the
  * table" leaves the user in charge of deciding whether that was right.
  */
+/** "the 480 chairs" / "the stage" — how a person would refer to what changed. */
+function describe(objects: SceneObject[]): string {
+  if (objects.length === 1) return objects[0]!.name ?? objects[0]!.type;
+
+  /*
+   * Generated objects are named per placement — "Table 12 chair 7" — so
+   * stripping a trailing number is not enough to find what they have in
+   * common; it produced "480 objects", which tells the user nothing about
+   * what just changed. The generated role is the actual noun.
+   */
+  const roles = new Set(
+    objects.map((o) => (o as SceneObject & { generatedRole?: string }).generatedRole).filter(Boolean)
+  );
+  if (roles.size === 1) {
+    const role = [...roles][0]!;
+    return `${objects.length} ${role}${/s$/.test(role) ? '' : 's'}`;
+  }
+
+  const types = new Set(objects.map((o) => o.type));
+  if (types.size === 1) {
+    const type = [...types][0]!;
+    return `${objects.length} ${type}${/s$/.test(type) ? '' : 's'}`;
+  }
+
+  return `${objects.length} objects`;
+}
+
+/** Scale stays in a range where an object is still recognisably itself. */
+const clampScale = (value: number): number => Math.max(0.05, Math.min(20, Number(value.toFixed(4))));
+
 async function apply(operation: AgentOperation): Promise<string | null> {
   const editor = useEditor.getState();
   const nameOf = (id: string) => editor.scene.objects.find((o) => o.id === id)?.name ?? 'that object';
@@ -195,6 +225,242 @@ async function apply(operation: AgentOperation): Promise<string | null> {
       return `Added ${count} more ${nameOf(operation.id)}, ${(spacing / 1000).toFixed(2)} m apart.`;
     }
 
+    /* -- Set-wide operations ------------------------------------------- */
+
+    /**
+     * Move a set by a delta.
+     *
+     * "Move the stage two metres forward" is relative, and `move` is absolute —
+     * answering a relative instruction with an absolute position means working
+     * out coordinates the model does not reliably have. Nudging preserves every
+     * spacing inside the set, so a stage and its screen stay together.
+     */
+    case 'nudge': {
+      const objects = editor.scene.objects.filter((o) => operation.ids.includes(o.id));
+      if (!objects.length) return null;
+      for (const object of objects) {
+        editor.updateObject(object.id, {
+          positionMm: {
+            x: Math.round(object.positionMm.x + (operation.deltaMm.x ?? 0)),
+            y: Math.round(object.positionMm.y + (operation.deltaMm.y ?? 0)),
+            z: Math.round(object.positionMm.z + (operation.deltaMm.z ?? 0)),
+          },
+        } as Partial<SceneObject>);
+      }
+      const metres = (n: number) => (n / 1000).toFixed(2).replace(/\.00$/, '');
+      const parts = [
+        operation.deltaMm.x ? `${metres(operation.deltaMm.x)} m across` : '',
+        operation.deltaMm.z ? `${metres(operation.deltaMm.z)} m along` : '',
+        operation.deltaMm.y ? `${metres(operation.deltaMm.y)} m up` : '',
+      ].filter(Boolean);
+      return `Moved ${describe(objects)} ${parts.join(' and ')}.`;
+    }
+
+    case 'scale': {
+      const objects = editor.scene.objects.filter((o) => operation.ids.includes(o.id));
+      if (!objects.length) return null;
+      for (const object of objects) {
+        editor.updateObject(object.id, {
+          scale: {
+            x: clampScale(object.scale.x * (operation.scale.x ?? 1)),
+            y: clampScale(object.scale.y * (operation.scale.y ?? 1)),
+            z: clampScale(object.scale.z * (operation.scale.z ?? 1)),
+          },
+        } as Partial<SceneObject>);
+      }
+      return `Scaled ${describe(objects)}.`;
+    }
+
+    /**
+     * Change an object's real dimensions rather than its scale factor.
+     *
+     * "Make the stage two metres wider" is a statement about millimetres, and
+     * answering it with a scale multiplier stretches the decking texture and
+     * makes the parts list wrong. Objects that carry real dimensions get them
+     * set; the rest fall back to scale, which is the honest approximation.
+     */
+    case 'resize': {
+      const object = editor.scene.objects.find((o) => o.id === operation.id);
+      if (!object) return null;
+      /*
+       * A stage is not sized in millimetres; it is a count of 4-foot decks.
+       * Setting a width on it would be ignored, so the request is converted
+       * into the nearest whole number of decks — which is also the only size a
+       * stage can actually be built at, and what the parts list counts.
+       */
+      if (object.type === 'stage') {
+        const stage = object as unknown as { deckColumns: number; deckRows: number };
+        const patch: Record<string, number> = {};
+        if (operation.dimensionsMm.width) {
+          patch.deckColumns = Math.max(1, Math.round(operation.dimensionsMm.width / STAGE_DECK_SIZE_MM));
+        }
+        if (operation.dimensionsMm.depth) {
+          patch.deckRows = Math.max(1, Math.round(operation.dimensionsMm.depth / STAGE_DECK_SIZE_MM));
+        }
+        if (operation.dimensionsMm.height) patch.deckHeightMm = Math.round(operation.dimensionsMm.height);
+        if (!Object.keys(patch).length) return null;
+        editor.updateObject(operation.id, patch as Partial<SceneObject>);
+        const w = (patch.deckColumns ?? stage.deckColumns) * STAGE_DECK_SIZE_MM;
+        const d = (patch.deckRows ?? stage.deckRows) * STAGE_DECK_SIZE_MM;
+        return `Resized ${nameOf(operation.id)} to ${(w / 1000).toFixed(1)} × ${(d / 1000).toFixed(1)} m — ${patch.deckColumns ?? stage.deckColumns} × ${patch.deckRows ?? stage.deckRows} decks.`;
+      }
+
+      const dims = (object as { dimensionsMm?: { width: number; depth: number; height: number } }).dimensionsMm;
+      if (dims) {
+        editor.updateObject(operation.id, {
+          dimensionsMm: {
+            width: Math.round(operation.dimensionsMm.width ?? dims.width),
+            depth: Math.round(operation.dimensionsMm.depth ?? dims.depth),
+            height: Math.round(operation.dimensionsMm.height ?? dims.height),
+          },
+        } as Partial<SceneObject>);
+      } else {
+        const flat = object as { widthMm?: number; depthMm?: number; heightMm?: number };
+        const patch: Record<string, number> = {};
+        if (operation.dimensionsMm.width && typeof flat.widthMm === 'number') {
+          patch.widthMm = Math.round(operation.dimensionsMm.width);
+        }
+        if (operation.dimensionsMm.depth && typeof flat.depthMm === 'number') {
+          patch.depthMm = Math.round(operation.dimensionsMm.depth);
+        }
+        if (operation.dimensionsMm.height && typeof flat.heightMm === 'number') {
+          patch.heightMm = Math.round(operation.dimensionsMm.height);
+        }
+        if (!Object.keys(patch).length) return null;
+        editor.updateObject(operation.id, patch as Partial<SceneObject>);
+      }
+      const said = Object.entries(operation.dimensionsMm)
+        .filter(([, v]) => typeof v === 'number')
+        .map(([k, v]) => `${k} ${((v as number) / 1000).toFixed(2)} m`)
+        .join(', ');
+      return `Resized ${nameOf(operation.id)} to ${said}.`;
+    }
+
+    /**
+     * Swap the model under a set, keeping every transform.
+     *
+     * This is what "replace all the chairs with black chairs" means: the same
+     * 480 places, a different chair in each. Rebuilding them would lose the
+     * arrangement, which is the part that took the work.
+     */
+    case 'replace_asset': {
+      const objects = editor.scene.objects.filter((o) => operation.ids.includes(o.id));
+      if (!objects.length) return null;
+
+      const item = useEditor.getState().itemCache[operation.catalogItemId];
+      for (const object of objects) {
+        const patch: Record<string, unknown> = { catalogItemId: operation.catalogItemId };
+        if (item) {
+          patch.modelUrl = item.modelUrl ?? undefined;
+          patch.dimensionsMm = {
+            width: item.widthMm ?? 600,
+            depth: item.depthMm ?? 600,
+            height: item.heightMm ?? 600,
+          };
+          // The old name described the old model, so it would lie afterwards.
+          patch.name = operation.name ?? item.name;
+        } else if (operation.name) {
+          patch.name = operation.name;
+        }
+        editor.updateObject(object.id, patch as Partial<SceneObject>);
+      }
+      return `Replaced ${describe(objects)} with ${operation.name ?? item?.name ?? 'the new model'}. Positions kept.`;
+    }
+
+    case 'set_material': {
+      const material = builtInMaterial(operation.materialId);
+      if (!material) return null;
+      const objects = editor.scene.objects.filter((o) => operation.ids.includes(o.id));
+      if (!objects.length) return null;
+      for (const object of objects) {
+        editor.applyFinish(object.id, operation.part ?? '*', toFinish(material));
+      }
+      return `Finished ${describe(objects)} in ${material.label}.`;
+    }
+
+    /**
+     * Put an image on a set.
+     *
+     * LED screens carry content; banners and shapes carry artwork. Both are
+     * "the picture on that surface" to the person asking, so one operation
+     * covers them and the object type decides which field it lands in.
+     */
+    case 'set_artwork': {
+      const objects = editor.scene.objects.filter((o) => operation.ids.includes(o.id));
+      if (!objects.length) return null;
+      let applied = 0;
+      for (const object of objects) {
+        if (object.type === 'led') {
+          editor.updateObject(object.id, { contentUrl: operation.imageUrl } as Partial<SceneObject>);
+          applied += 1;
+        } else {
+          editor.updateObject(object.id, { imageUrl: operation.imageUrl } as Partial<SceneObject>);
+          applied += 1;
+        }
+      }
+      if (!applied) return null;
+      return `Put the artwork on ${describe(objects)}.`;
+    }
+
+    case 'set_light': {
+      const objects = editor.scene.objects.filter(
+        (o) => operation.ids.includes(o.id) && o.type === 'light'
+      );
+      if (!objects.length) return null;
+      for (const object of objects) {
+        const patch: Record<string, unknown> = {};
+        if (operation.colorHex) patch.colorHex = operation.colorHex;
+        if (typeof operation.intensity === 'number') {
+          patch.intensity = Math.max(0, Math.min(10, operation.intensity));
+        }
+        if (Object.keys(patch).length) editor.updateObject(object.id, patch as Partial<SceneObject>);
+      }
+      return `Adjusted ${describe(objects)}.`;
+    }
+
+    /**
+     * Add more of something already in the plan.
+     *
+     * "Add 50 more chairs" needs somewhere to put them. They are laid out in a
+     * block beside the set they copy, at that set's own spacing, so they arrive
+     * ordered and visible rather than stacked on the original.
+     */
+    case 'add_more': {
+      const source = editor.scene.objects.find((o) => o.id === operation.likeId);
+      if (!source) return null;
+      const count = Math.min(Math.max(1, Math.round(operation.count)), 500);
+
+      // Spacing from the source's own footprint, so chairs pack like chairs and
+      // tables like tables.
+      const size = (source as { dimensionsMm?: { width: number; depth: number } }).dimensionsMm;
+      const spacing = Math.max(700, Math.round((size?.width ?? 800) * 1.35));
+
+      // Beside the existing set rather than on top of it.
+      const peers = editor.scene.objects.filter(
+        (o) => (o as { catalogItemId?: number }).catalogItemId === (source as { catalogItemId?: number }).catalogItemId
+      );
+      const rightEdge = peers.reduce((max, o) => Math.max(max, o.positionMm.x), source.positionMm.x);
+
+      const columns = Math.max(1, Math.ceil(Math.sqrt(count)));
+      const copies: SceneObject[] = Array.from({ length: count }, (_, index) => {
+        const column = index % columns;
+        const row = Math.floor(index / columns);
+        return {
+          ...structuredClone(source),
+          id: crypto.randomUUID(),
+          // A fresh group: these are new, not members of the set they copy.
+          groupId: null,
+          positionMm: {
+            x: Math.round(rightEdge + spacing * (column + 2)),
+            y: source.positionMm.y,
+            z: Math.round(source.positionMm.z + spacing * row),
+          },
+        } as SceneObject;
+      });
+      editor.addObjects(copies);
+      return `Added ${count} more ${source.name ?? source.type}, in a block beside the existing ones.`;
+    }
+
     case 'focus': {
       if (!editor.scene.objects.some((o) => o.id === operation.id)) return null;
       editor.focusObject(operation.id);
@@ -241,6 +507,18 @@ async function apply(operation: AgentOperation): Promise<string | null> {
 }
 
 /* ── The hook ──────────────────────────────────────────────────────────── */
+
+/**
+ * The operation applier, reachable from a test.
+ *
+ * `apply` is deliberately private — nothing in the app should be able to run an
+ * agent operation except the agent — but a browser test has to be able to prove
+ * that replacing 480 chairs keeps 480 positions, and that is not provable
+ * through the chat UI without a live model in the loop.
+ */
+export const applyOperationForTest = import.meta.env.DEV
+  ? (operation: AgentOperation) => apply(operation)
+  : undefined;
 
 export interface AgentMessage {
   id: string;

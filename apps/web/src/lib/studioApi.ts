@@ -52,7 +52,20 @@ export type AgentOperation =
   | { action: 'open_panel'; panel: string; note?: string }
   | { action: 'generate_3d'; prompt: string; name: string; note?: string }
   | { action: 'apply_look'; look: string; note?: string }
-  | { action: 'survey'; note: string };
+  | { action: 'survey'; note: string }
+  /*
+   * Set-wide operations. Everything above works on one object; these take a
+   * whole group's ids so "replace all the chairs" is one operation rather than
+   * 480 — which would neither fit in a reply nor be produced reliably.
+   */
+  | { action: 'nudge'; ids: string[]; deltaMm: { x: number; y: number; z: number }; note?: string }
+  | { action: 'scale'; ids: string[]; scale: { x: number; y: number; z: number }; note?: string }
+  | { action: 'resize'; id: string; dimensionsMm: { width?: number; depth?: number; height?: number }; note?: string }
+  | { action: 'replace_asset'; ids: string[]; catalogItemId: number; name?: string; note?: string }
+  | { action: 'set_material'; ids: string[]; materialId: string; part?: string; note?: string }
+  | { action: 'set_artwork'; ids: string[]; imageUrl: string; note?: string }
+  | { action: 'set_light'; ids: string[]; colorHex?: string; intensity?: number; note?: string }
+  | { action: 'add_more'; likeId: string; count: number; note?: string };
 
 export interface AgentReply {
   reply: string;
