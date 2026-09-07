@@ -231,7 +231,17 @@ export interface SceneSnapshot {
     widthMm?: number | null;
     depthMm?: number | null;
     heightMm?: number | null;
+    /** What part of the event this plays, when it was generated as one. */
+    role?: string;
   }>;
+  /**
+   * Repeated sets in the plan, counted, with complete membership.
+   *
+   * `objects` is capped so a several-hundred-object event fits in a context
+   * window; these are what make an instruction about a whole set answerable
+   * exactly rather than across whatever part of it happened to fit.
+   */
+  groups?: Array<{ label: string; role?: string; count: number; ids: string[] }>;
 }
 
 /**
@@ -290,7 +300,46 @@ const AGENT_SYSTEM = [
   '',
   'Use ids exactly as they appear in the snapshot. Propose no operations at all if the user only asked a',
   'question — an answer is a complete response. Never propose deleting more than the user asked for.',
+  '',
+  'The snapshot has two parts. `objects` is a sample — a large plan does not fit here in full. `groups`',
+  'lists every repeated set with its complete membership, so an instruction about a whole set ("all the',
+  'chairs", "every banner") must be answered from `groups`, using all of its ids, not from the sample.',
+  'Say how many you are changing, so the user can see the whole set was covered.',
 ].join('\n');
+
+/**
+ * Fit a snapshot into the model's budget without losing the group summary.
+ *
+ * Groups are the part that makes a whole-set instruction exact, and they are
+ * cheap — a few hundred ids against a much larger object sample. So they are
+ * reserved first and the sample is trimmed to whatever is left.
+ */
+function snapshotForModel(snapshot: SceneSnapshot): string {
+  const BUDGET = 12_000;
+  const head = {
+    title: snapshot.title,
+    units: snapshot.units,
+    regionCode: snapshot.regionCode,
+    objectCount: snapshot.objectCount,
+    roomWidthMm: snapshot.roomWidthMm,
+    roomDepthMm: snapshot.roomDepthMm,
+    groups: snapshot.groups ?? [],
+  };
+
+  const headJson = JSON.stringify(head);
+  const room = BUDGET - headJson.length - 32;
+
+  const objects: SceneSnapshot['objects'] = [];
+  let used = 0;
+  for (const object of snapshot.objects) {
+    const size = JSON.stringify(object).length + 1;
+    if (used + size > room) break;
+    objects.push(object);
+    used += size;
+  }
+
+  return JSON.stringify({ ...head, objects });
+}
 
 export async function sceneAgent(input: {
   message: string;
@@ -377,7 +426,16 @@ export async function smartSuggestion(snapshot: SceneSnapshot, avoid: string[] =
           avoid.length ? `\nALREADY SUGGESTED — say something different:\n${avoid.slice(-6).join('\n')}` : '',
         ].join('\n'),
       },
-      { role: 'user', content: JSON.stringify(snapshot).slice(0, 8000) },
+      /*
+       * Send the summary whole and the sample trimmed.
+       *
+       * A flat truncation cut whichever half came last, and with several
+       * hundred ids in `groups` that was reliably the part carrying complete
+       * set membership — the model would then answer a whole-set instruction
+       * from the sample and change 200 of 480 chairs. The groups are small
+       * enough to always fit; the object sample is what gets shortened.
+       */
+      { role: 'user', content: snapshotForModel(snapshot) },
     ],
     { temperature: 0.9, maxTokens: 160 }
   );

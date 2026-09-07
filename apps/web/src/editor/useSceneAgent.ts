@@ -44,8 +44,10 @@ export function buildSnapshot(): SceneSnapshot {
     ...(hasRoom
       ? { roomWidthMm: Math.round(bounds.maxX - bounds.minX), roomDepthMm: Math.round(bounds.maxZ - bounds.minZ) }
       : {}),
-    // Capped: a 400-object plan would blow the context window, and the first
-    // 200 are enough to answer anything anyone actually asks.
+    /*
+     * The object list is capped, because a generated event runs to several
+     * hundred objects and all of them would not fit in a context window.
+     */
     objects: scene.objects.slice(0, 200).map((object) => ({
       id: object.id,
       name: object.name ?? object.type,
@@ -56,8 +58,63 @@ export function buildSnapshot(): SceneSnapshot {
         z: Math.round(object.positionMm?.z ?? 0),
       },
       ...sizeOf(object),
+      ...(roleOf(object) ? { role: roleOf(object) } : {}),
     })),
+    groups: summariseGroups(scene.objects),
   };
+}
+
+const roleOf = (object: SceneObject): string | undefined =>
+  (object as SceneObject & { assemblyRole?: string }).assemblyRole;
+
+/**
+ * Count the repeated sets in a plan, with every id.
+ *
+ * The cap above is what makes this necessary. "Replace all the chairs" against
+ * a 480-chair banquet used to reach the 200 the model could see and leave the
+ * rest, which is worse than refusing — the plan ends up half changed and the
+ * user has to find which half. Grouping is cheap, always complete, and turns a
+ * whole-set instruction into an exact one.
+ *
+ * Sets are keyed on what a person would call them: the catalogue item for a
+ * placed model, otherwise the kind of thing it is.
+ */
+function summariseGroups(objects: SceneObject[]): SceneSnapshot['groups'] {
+  const map = new Map<string, { label: string; role?: string; ids: string[] }>();
+
+  for (const object of objects) {
+    const catalogId = (object as SceneObject & { catalogItemId?: number }).catalogItemId;
+    const generated = (object as SceneObject & { generatedRole?: string }).generatedRole;
+    const role = roleOf(object);
+
+    const key = catalogId ? `catalog:${catalogId}` : `type:${object.type}:${generated ?? ''}`;
+    /*
+     * Name the set, not the first thing in it.
+     *
+     * These objects are named per placement — "Table 1 chair 1", "Table 12
+     * chair 7" — so taking the first one's name labelled a set of 480 chairs
+     * "Table 1 chair 1", which reads as one chair and invites an instruction
+     * that touches one. The generated role is what the set actually is.
+     */
+    const label = generated
+      ? `${generated}s`
+      : catalogId
+        ? (object.name ?? `catalogue item ${catalogId}`).replace(/\s*—.*$/, '')
+        : role
+          ? `${role} ${object.type}s`
+          : `${object.type}s`;
+
+    const entry = map.get(key);
+    if (entry) entry.ids.push(object.id);
+    else map.set(key, { label, role, ids: [object.id] });
+  }
+
+  return [...map.values()]
+    // A set of one is not a set; it is already in the object list.
+    .filter((entry) => entry.ids.length > 1)
+    .sort((a, b) => b.ids.length - a.ids.length)
+    .slice(0, 30)
+    .map((entry) => ({ label: entry.label, role: entry.role, count: entry.ids.length, ids: entry.ids }));
 }
 
 function sizeOf(object: SceneObject) {

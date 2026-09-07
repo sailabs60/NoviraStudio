@@ -74,6 +74,24 @@ export interface SceneSnapshot {
     widthMm?: number | null;
     depthMm?: number | null;
     heightMm?: number | null;
+    /** What part of the event this plays, when it was generated as one. */
+    role?: string;
+  }>;
+  /**
+   * Every repeated set in the plan, counted.
+   *
+   * The object list is capped, because a 571-object event does not fit in a
+   * context window. That cap used to mean an instruction like "replace all the
+   * chairs" silently reached 200 of 480 of them. This summary is small, always
+   * complete, and carries the ids, so an instruction about a whole set can be
+   * answered exactly rather than approximately.
+   */
+  groups?: Array<{
+    label: string;
+    role?: string;
+    count: number;
+    /** Every id in the set. Complete, not sampled. */
+    ids: string[];
   }>;
 }
 

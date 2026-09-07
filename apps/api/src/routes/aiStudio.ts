@@ -277,9 +277,30 @@ const snapshotSchema = z.object({
         widthMm: z.number().nullable().optional(),
         depthMm: z.number().nullable().optional(),
         heightMm: z.number().nullable().optional(),
+        role: z.string().max(40).optional(),
       })
     )
     .max(400),
+  /*
+   * Repeated sets, counted, with every id.
+   *
+   * The object list above is capped, so an instruction about a whole set —
+   * "replace all the chairs" against a 480-chair banquet — could only reach
+   * the part of it the model could see. These carry the complete membership in
+   * a fraction of the tokens, so the answer covers the set rather than a slice
+   * of it.
+   */
+  groups: z
+    .array(
+      z.object({
+        label: z.string().max(120),
+        role: z.string().max(40).optional(),
+        count: z.number(),
+        ids: z.array(z.string()).max(2000),
+      })
+    )
+    .max(30)
+    .optional(),
 });
 
 const agentBody = z.object({
