@@ -310,6 +310,7 @@ function SceneNode({ object, selected }: { object: SceneObject; selected: boolea
   const showMeasurements = useEditor((s) => s.showMeasurements);
   const readOnly = useEditor((s) => s.readOnly);
   const tool = useEditor((s) => s.tool);
+  const pendingItem = useEditor((s) => s.pendingItem);
   const sceneShadows = useEditor((s) => s.scene.lighting.shadowsEnabled);
   const rendererProfile = useRendererProfile();
   const shadowsEnabled = sceneShadows && rendererProfile.shadowMapSize > 0;
@@ -324,8 +325,14 @@ function SceneNode({ object, selected }: { object: SceneObject; selected: boolea
        * every drafting click that lands on a table selects the table instead of
        * placing a point — and drafting is done over a room full of furniture,
        * so that is most of them. Same for the wall tool.
+       *
+       * An armed item is the same situation: the click means "put it here",
+       * not "select whatever happens to be under the cursor", and a room busy
+       * enough to be worth adding to is exactly the one where something is
+       * always under the cursor.
        */
-      if (tool === 'draw' || tool === 'wall') return;
+      if (tool === 'draw' || tool === 'wall' || tool === 'constraint') return;
+      if (pendingItem) return;
 
       // The pointerup ending a box-select drag can land on an object as
       // easily as on the ground, and looks the same as a click either way —
@@ -339,7 +346,7 @@ function SceneNode({ object, selected }: { object: SceneObject; selected: boolea
       if (readOnly) return;
       toggleSelect(object.id, event.shiftKey || event.ctrlKey || event.metaKey);
     },
-    [object.id, toggleSelect, readOnly, tool]
+    [object.id, toggleSelect, readOnly, tool, pendingItem]
   );
 
   /**
@@ -572,6 +579,7 @@ function Ground() {
   const setPendingItem = useEditor((s) => s.setPendingItem);
   const addObjects = useEditor((s) => s.addObjects);
   const clearSelection = useEditor((s) => s.clearSelection);
+  const setPlaceHover = useEditor((s) => s.setPlaceHover);
   const snapToGrid = useEditor((s) => s.snapToGrid);
   const gridSizeMm = useEditor((s) => s.scene.gridSizeMm);
 
@@ -649,9 +657,30 @@ function Ground() {
       }
       if (tool === 'constraint') {
         setConstraintHover(snapDraftPoint(event.point.x, event.point.z));
+        return;
+      }
+      /*
+       * Track where an armed item would land, so the ghost follows the cursor.
+       * Snapped here rather than in the ghost, so what is previewed is exactly
+       * what the click will commit.
+       */
+      if (pendingItem) {
+        let x = worldToMm(event.point.x);
+        let z = worldToMm(event.point.z);
+        if (snapToGrid && gridSizeMm > 0) {
+          x = Math.round(x / gridSizeMm) * gridSizeMm;
+          z = Math.round(z / gridSizeMm) * gridSizeMm;
+        }
+        setPlaceHover({ xMm: x, zMm: z });
+        // On-demand rendering: without this the ghost would only redraw when
+        // something else happened to ask for a frame, so it would lag or stick.
+        invalidate();
       }
     },
-    [wallDrawing, setWallHover, toPlanPoint, tool, setDrawHover, snapDraftPoint, setConstraintHover]
+    [
+      wallDrawing, setWallHover, toPlanPoint, tool, setDrawHover, snapDraftPoint,
+      setConstraintHover, pendingItem, setPlaceHover, snapToGrid, gridSizeMm,
+    ]
   );
 
   const onClick = useCallback(

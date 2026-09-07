@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Check, Loader2, RotateCcw, Sparkles, Wand2, X } from 'lucide-react';
-import type { CatalogSceneObject } from '@novira/shared';
+import type { CatalogItemDto } from '@novira/shared';
 import { useEditor } from './editorStore';
 import { useQuery } from '@tanstack/react-query';
 import { studio, type AiJobLike } from '../lib/studioApi';
@@ -70,7 +70,8 @@ const STYLES = [
 
 export function AiCreate({ onClose }: { onClose: () => void }) {
   const planId = useEditor((s) => s.planId);
-  const addObjects = useEditor((s) => s.addObjects);
+  const cacheItems = useEditor((s) => s.cacheItems);
+  const setPendingItem = useEditor((s) => s.setPendingItem);
 
   const [stage, setStage] = useState<Stage>('prompt');
   const [prompt, setPrompt] = useState('');
@@ -216,27 +217,32 @@ export function AiCreate({ onClose }: { onClose: () => void }) {
         heightMm: Math.round(heightMm),
       };
 
-      const object: CatalogSceneObject = {
-        id: crypto.randomUUID(),
-        type: 'catalog',
+      /*
+       * Arm it rather than drop it.
+       *
+       * Dropping at the origin puts the object wherever the origin happens to
+       * be — usually off-camera, in the middle of whatever is already there,
+       * and needing to be found before it can be moved. Arming it hands the
+       * object to the cursor: the editor already draws a translucent ghost of
+       * a pending item where it would land, so you see it standing in the
+       * room, at its real size, against what is already built, and click the
+       * spot you want. That preview is the whole point of generating into a
+       * plan rather than into a gallery.
+       */
+      const dto = {
+        id: item.id,
         name: item.name,
-        catalogItemId: item.id,
         modelUrl: item.modelUrl ?? modelUrl,
-        dimensionsMm: {
-          width: item.widthMm ?? 600,
-          depth: item.depthMm ?? 600,
-          height: item.heightMm ?? Math.round(heightMm),
-        },
-        seatsDefault: null,
-        tableShape: null,
-        // On the floor at the origin; the next drag positions it.
-        positionMm: { x: 0, y: 0, z: 0 },
-        rotationDeg: { x: 0, y: 0, z: 0 },
-        scale: { x: 1, y: 1, z: 1 },
-      };
+        previewImage: (typeof output.thumbnailUrl === 'string' ? output.thumbnailUrl : null),
+        widthMm: item.widthMm ?? null,
+        depthMm: item.depthMm ?? null,
+        heightMm: item.heightMm ?? Math.round(heightMm),
+        description: `Generated from: ${prompt.trim()}`,
+      } as unknown as CatalogItemDto;
 
-      addObjects([object]);
-      toast('success', `${item.name} placed, and saved to your library.`);
+      cacheItems([dto]);
+      setPendingItem(dto);
+      toast('success', `${item.name} is ready — click the floor to place it.`);
       onClose();
     } catch (error: unknown) {
       toast(

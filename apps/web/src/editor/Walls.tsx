@@ -14,6 +14,25 @@ import { useEditor } from './editorStore';
 const DEG = Math.PI / 180;
 
 /**
+ * Should a click on built geometry be allowed to fall through to the ground?
+ *
+ * Walls and floor slabs sit fractionally in front of the ground plane, so a
+ * raycast reaches them first. That is right for selecting them, and wrong for
+ * everything that is really aimed at the floor underneath: placing a catalogue
+ * item, drafting a wall run, drawing a zone. Those clicks were being swallowed
+ * by whatever happened to be nearest the camera, which inside a room with a
+ * floor meant nothing could ever be placed — the pending item stayed armed and
+ * clicking did nothing at all.
+ *
+ * So selection yields whenever the click plainly means something else.
+ */
+function useClickFallsThrough() {
+  const pendingItem = useEditor((s) => s.pendingItem);
+  const tool = useEditor((s) => s.tool);
+  return !!pendingItem || tool === 'draw' || tool === 'wall' || tool === 'constraint';
+}
+
+/**
  * Wall rendering.
  *
  * A segment becomes a box, positioned at its midpoint and rotated to its
@@ -100,18 +119,27 @@ function WallSegmentMesh({
   onSelect: (id: string, additive: boolean) => void;
 }) {
   const length = segmentLength(segment.start, segment.end);
-  if (length < 1) return null;
-
   const angle = segmentAngleDeg(segment.start, segment.end);
   const pieces = useMemo(() => splitWallAroundOpenings(segment, openings), [segment, openings]);
 
+  const fallsThrough = useClickFallsThrough();
   const handleClick = useCallback(
     (event: ThreeEvent<MouseEvent>) => {
+      // Let placement and drafting clicks reach the ground beneath.
+      if (fallsThrough) return;
       event.stopPropagation();
       onSelect(segment.id, event.shiftKey || event.ctrlKey || event.metaKey);
     },
-    [segment.id, onSelect]
+    [segment.id, onSelect, fallsThrough]
   );
+
+  /*
+   * A zero-length segment has nothing to draw. The check has to come after the
+   * hooks above, not before them: returning early from the middle of a
+   * component's hook list changes how many hooks React sees on that render and
+   * desynchronises every one that follows.
+   */
+  if (length < 1) return null;
 
   return (
     <group
@@ -168,12 +196,15 @@ function FloorMesh({
     return new THREE.ShapeGeometry(shape);
   }, [floor.points]);
 
+  const fallsThrough = useClickFallsThrough();
   const handleClick = useCallback(
     (event: ThreeEvent<MouseEvent>) => {
+      // Let placement and drafting clicks reach the ground beneath.
+      if (fallsThrough) return;
       event.stopPropagation();
       onSelect(floor.id, event.shiftKey || event.ctrlKey || event.metaKey);
     },
-    [floor.id, onSelect]
+    [floor.id, onSelect, fallsThrough]
   );
 
   return (

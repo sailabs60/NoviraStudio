@@ -313,6 +313,13 @@ interface EditorState {
   /** Points placed so far in the annotation being drawn. */
   drawDraft: WallPoint[];
   drawHover: WallPoint | null;
+  /**
+   * Where an armed item would land, in mm, tracked as the cursor crosses the
+   * floor. Click-to-place needs the same full-size ghost that drag-and-drop
+   * gets: seeing a 2.4 m counter stand in the room before committing to it is
+   * the whole difference between placing and guessing.
+   */
+  placeHover: { xMm: number; zMm: number } | null;
   drawKind: DrawKind;
   drawStyle: DrawingStyle;
   /** Height the annotation is drawn at; a rig plan sits above the floor. */
@@ -325,6 +332,7 @@ interface EditorState {
   toggleMeasurements: () => void;
   addDrawPoint: (point: WallPoint) => void;
   setDrawHover: (point: WallPoint | null) => void;
+  setPlaceHover: (point: { xMm: number; zMm: number } | null) => void;
   finishDrawing: () => void;
   cancelDrawing: () => void;
 
@@ -415,6 +423,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   wallDraft: [],
   drawDraft: [],
   drawHover: null,
+  placeHover: null,
   drawKind: 'dimension',
   drawStyle: { ...DEFAULT_DRAWING_STYLE },
   drawElevationMm: 0,
@@ -661,7 +670,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       return { isolateMode: true, isolatedIds: [...s.selectedIds] };
     }),
 
-  setPendingItem: (pendingItem) => set({ pendingItem }),
+  // Disarming also drops the hover, so a cancelled placement leaves no ghost
+  // standing in the room.
+  setPendingItem: (pendingItem) => set({ pendingItem, placeHover: null }),
 
   addObjects: (objects) => {
     get().commit((draft) => {
@@ -802,6 +813,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   toggleMeasurements: () => set((st) => ({ showMeasurements: !st.showMeasurements })),
 
   setDrawHover: (drawHover) => set({ drawHover }),
+  setPlaceHover: (placeHover) => set({ placeHover }),
 
   /**
    * Add a point, and finish automatically once the shape has all it needs.

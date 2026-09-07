@@ -3,6 +3,7 @@ import { useGLTF } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { mmToWorld } from '@novira/shared';
+import type { CatalogItemDto } from '@novira/shared';
 import { useDrag } from './dragStore';
 import { useEditor } from './editorStore';
 
@@ -28,6 +29,44 @@ import { useEditor } from './editorStore';
  *    would make a material drop land on the preview of itself.
  */
 export function DropPreview() {
+  return (
+    <>
+      <DragGhost />
+      <ArmedGhost />
+    </>
+  );
+}
+
+/**
+ * The ghost for click-to-place.
+ *
+ * Arming an item — from the catalogue, or straight out of the AI generator —
+ * is a placement in progress just as much as a drag is, and it deserves the
+ * same preview. Without it the only feedback is a line of text saying to click
+ * the floor, which tells you nothing about whether the thing you just made is
+ * the right size for the room it is going into.
+ */
+function ArmedGhost() {
+  const pendingItem = useEditor((s) => s.pendingItem);
+  const placeHover = useEditor((s) => s.placeHover);
+
+  if (!pendingItem || !placeHover) return null;
+  // Openings belong to a wall, not to a point on the floor; previewing one
+  // standing in open air would be a lie about where it can go.
+  if (pendingItem.categorySlug === 'doors-windows') return null;
+
+  return (
+    <PlacementGhost
+      payload={{ kind: 'catalog', item: pendingItem }}
+      xMm={placeHover.xMm}
+      yMm={0}
+      zMm={placeHover.zMm}
+      snapped={false}
+    />
+  );
+}
+
+function DragGhost() {
   const payload = useDrag((s) => s.payload);
   const intent = useDrag((s) => s.intent);
   const overViewport = useDrag((s) => s.overViewport);
@@ -53,14 +92,16 @@ export function DropPreview() {
 
 /* ── A model, translucent, standing where it would land ────────────────── */
 
-function PlacementGhost({
+export function PlacementGhost({
   payload,
   xMm,
   yMm,
   zMm,
   snapped,
 }: {
-  payload: NonNullable<ReturnType<typeof useDrag.getState>['payload']>;
+  payload:
+    | NonNullable<ReturnType<typeof useDrag.getState>['payload']>
+    | { kind: 'catalog'; item: CatalogItemDto };
   xMm: number;
   /** The surface height found under the cursor, so the ghost stands on it. */
   yMm: number;
