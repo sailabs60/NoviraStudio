@@ -1,5 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
-import { builtInMaterial, toFinish, STAGE_DECK_SIZE_MM, type SceneObject } from '@novira/shared';
+import {
+  builtInMaterial,
+  deriveLedScreen,
+  fitLedScreen,
+  toFinish,
+  STAGE_DECK_SIZE_MM,
+  type SceneObject,
+} from '@novira/shared';
 import { useEditor, type WorkPanel } from './editorStore';
 import { studio, type AgentOperation, type SceneSnapshot } from '../lib/studioApi';
 import { toast } from '../components/ui';
@@ -61,6 +68,76 @@ export function buildSnapshot(): SceneSnapshot {
       ...(roleOf(object) ? { role: roleOf(object) } : {}),
     })),
     groups: summariseGroups(scene.objects),
+    selection: describeSelection(scene.objects, state.selectedIds),
+  };
+}
+
+/**
+ * The objects the user is pointing at, described properly.
+ *
+ * Everything else in the snapshot is a sample or a summary, because a whole
+ * event does not fit. The selection is the exception: it is small, and it is
+ * what the next sentence is most likely about. "Make this 5 metres wide" and
+ * "rotate these to face the stage" are unanswerable without it, and they are
+ * how people actually talk to a tool with something already highlighted.
+ *
+ * Capped at a handful of objects. Selecting 480 chairs and asking about "these"
+ * is a set instruction, and the group summary already carries every id.
+ */
+function describeSelection(
+  objects: SceneObject[],
+  selectedIds: string[]
+): SceneSnapshot['selection'] {
+  if (!selectedIds.length) return undefined;
+
+  const groupSizes = new Map<string, number>();
+  for (const object of objects) {
+    const group = (object as SceneObject & { groupId?: string | null }).groupId;
+    if (group) groupSizes.set(group, (groupSizes.get(group) ?? 0) + 1);
+  }
+
+  const chosen = objects.filter((o) => selectedIds.includes(o.id));
+
+  return {
+    count: chosen.length,
+    ids: selectedIds.slice(0, 500),
+    objects: chosen.slice(0, 6).map((object) => {
+      const size = sizeOf(object);
+      const dims =
+        typeof size.widthMm === 'number'
+          ? { width: size.widthMm, depth: size.depthMm ?? 0, height: size.heightMm ?? 0 }
+          : undefined;
+      const group = (object as SceneObject & { groupId?: string | null }).groupId ?? null;
+      return {
+        id: object.id,
+        name: object.name ?? object.type,
+        type: object.type,
+        ...(roleOf(object) ? { role: roleOf(object) } : {}),
+        positionMm: {
+          x: Math.round(object.positionMm?.x ?? 0),
+          y: Math.round(object.positionMm?.y ?? 0),
+          z: Math.round(object.positionMm?.z ?? 0),
+        },
+        rotationDeg: {
+          x: Math.round(object.rotationDeg?.x ?? 0),
+          y: Math.round(object.rotationDeg?.y ?? 0),
+          z: Math.round(object.rotationDeg?.z ?? 0),
+        },
+        scale: {
+          x: object.scale?.x ?? 1,
+          y: object.scale?.y ?? 1,
+          z: object.scale?.z ?? 1,
+        },
+        ...(dims ? { dimensionsMm: dims } : {}),
+        ...((object as { catalogItemId?: number }).catalogItemId
+          ? { catalogItemId: (object as { catalogItemId?: number }).catalogItemId }
+          : {}),
+        ...(group ? { groupId: group, groupCount: groupSizes.get(group) ?? 1 } : {}),
+        ...(object.finishes && Object.keys(object.finishes).length
+          ? { materials: Object.keys(object.finishes) }
+          : {}),
+      };
+    }),
   };
 }
 
@@ -117,9 +194,38 @@ function summariseGroups(objects: SceneObject[]): SceneSnapshot['groups'] {
     .map((entry) => ({ label: entry.label, role: entry.role, count: entry.ids.length, ids: entry.ids }));
 }
 
+/**
+ * How big an object actually is, in millimetres.
+ *
+ * Placed catalogue models carry their dimensions and shapes carry a width and
+ * depth, but the procedural types carry neither: a stage is a count of decks, a
+ * screen is a grid of cabinets, a truss is a span. Returning nothing for those
+ * meant that selecting the LED wall and saying "make this five metres wide" had
+ * no current width to work from, which is the one thing that instruction needs.
+ * So the size is derived from what each type is actually made of.
+ */
 function sizeOf(object: SceneObject) {
   const dims = (object as { dimensionsMm?: { width: number; depth: number; height: number } }).dimensionsMm;
   if (dims) return { widthMm: dims.width, depthMm: dims.depth, heightMm: dims.height };
+
+  if (object.type === 'stage') {
+    const stage = object as unknown as { deckColumns: number; deckRows: number; deckHeightMm: number };
+    return {
+      widthMm: stage.deckColumns * STAGE_DECK_SIZE_MM,
+      depthMm: stage.deckRows * STAGE_DECK_SIZE_MM,
+      heightMm: stage.deckHeightMm,
+    };
+  }
+
+  if (object.type === 'led') {
+    const derived = deriveLedScreen(object as never);
+    return {
+      widthMm: Math.round(derived.widthMm),
+      depthMm: Math.round(derived.panel.depthMm),
+      heightMm: Math.round(derived.heightMm),
+    };
+  }
+
   const wide = object as { widthMm?: number; depthMm?: number; heightMm?: number };
   if (typeof wide.widthMm === 'number') {
     return { widthMm: wide.widthMm, depthMm: wide.depthMm ?? null, heightMm: wide.heightMm ?? null };
@@ -303,6 +409,29 @@ async function apply(operation: AgentOperation): Promise<string | null> {
         const w = (patch.deckColumns ?? stage.deckColumns) * STAGE_DECK_SIZE_MM;
         const d = (patch.deckRows ?? stage.deckRows) * STAGE_DECK_SIZE_MM;
         return `Resized ${nameOf(operation.id)} to ${(w / 1000).toFixed(1)} × ${(d / 1000).toFixed(1)} m — ${patch.deckColumns ?? stage.deckColumns} × ${patch.deckRows ?? stage.deckRows} decks.`;
+      }
+
+      /*
+       * An LED wall is a grid of cabinets, so a width is a column count.
+       *
+       * Setting millimetres on it would be ignored the same way it was on a
+       * stage, and a wall that is not a whole number of cabinets cannot be
+       * built. Fitting rounds to the nearest real size, which is also what a
+       * screen supplier would quote.
+       */
+      if (object.type === 'led') {
+        const screen = object as unknown as { panelKey: string; columns: number; rows: number };
+        const derived = deriveLedScreen(object as never);
+        const fitted = fitLedScreen(
+          screen.panelKey,
+          operation.dimensionsMm.width ?? derived.widthMm,
+          operation.dimensionsMm.height ?? derived.heightMm
+        );
+        editor.updateObject(operation.id, {
+          columns: fitted.columns,
+          rows: fitted.rows,
+        } as Partial<SceneObject>);
+        return `Resized ${nameOf(operation.id)} to ${(fitted.widthMm / 1000).toFixed(1)} × ${(fitted.heightMm / 1000).toFixed(1)} m — ${fitted.columns} × ${fitted.rows} cabinets.`;
       }
 
       const dims = (object as { dimensionsMm?: { width: number; depth: number; height: number } }).dimensionsMm;

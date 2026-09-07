@@ -106,6 +106,35 @@ export interface SceneSnapshot {
     /** Every id in the set. Complete, not sampled. */
     ids: string[];
   }>;
+  /**
+   * What the user has selected in the viewport, in full.
+   *
+   * "Make this 5 metres wide" is the most natural way to ask for a change, and
+   * it is unanswerable without knowing what "this" is. The sampled object list
+   * carries only a position and a size; a selected object gets its dimensions,
+   * rotation, scale, materials and group membership, because that is the object
+   * the next instruction is almost certainly about.
+   */
+  selection?: {
+    count: number;
+    /** The whole set when several are selected, so "delete these" works. */
+    ids: string[];
+    objects: Array<{
+      id: string;
+      name: string;
+      type: string;
+      role?: string;
+      positionMm: { x: number; y: number; z: number };
+      rotationDeg: { x: number; y: number; z: number };
+      scale: { x: number; y: number; z: number };
+      dimensionsMm?: { width: number; depth: number; height: number };
+      catalogItemId?: number;
+      /** The set this belongs to, so "the rest of these" resolves. */
+      groupId?: string | null;
+      groupCount?: number;
+      materials?: string[];
+    }>;
+  };
 }
 
 export const studio = {

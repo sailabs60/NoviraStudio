@@ -242,6 +242,31 @@ export interface SceneSnapshot {
    * exactly rather than across whatever part of it happened to fit.
    */
   groups?: Array<{ label: string; role?: string; count: number; ids: string[] }>;
+  /**
+   * What the user has selected in the viewport, described in full.
+   *
+   * Everything else here is a sample or a summary; this is the exception,
+   * because an instruction containing "this" or "these" cannot be answered
+   * without it.
+   */
+  selection?: {
+    count: number;
+    ids: string[];
+    objects: Array<{
+      id: string;
+      name: string;
+      type: string;
+      role?: string;
+      positionMm: { x: number; y: number; z: number };
+      rotationDeg: { x: number; y: number; z: number };
+      scale: { x: number; y: number; z: number };
+      dimensionsMm?: { width: number; depth: number; height: number };
+      catalogItemId?: number;
+      groupId?: string | null;
+      groupCount?: number;
+      materials?: string[];
+    }>;
+  };
 }
 
 /**
@@ -337,7 +362,11 @@ const AGENT_SYSTEM = [
   'Use ids exactly as they appear in the snapshot. Propose no operations at all if the user only asked a',
   'question — an answer is a complete response. Never propose deleting more than the user asked for.',
   '',
-  'The snapshot has two parts. `objects` is a sample — a large plan does not fit here in full. `groups`',
+  'When `selection` is present the user has something highlighted, and a sentence containing "this",',
+  '"these", "it" or "them" almost certainly means that. Act on the selected ids rather than searching the',
+  'sample for something with a matching name.',
+  '',
+  'The snapshot has three parts. `objects` is a sample — a large plan does not fit here in full. `groups`',
   'lists every repeated set with its complete membership, so an instruction about a whole set ("all the',
   'chairs", "every banner") must be answered from `groups`, using all of its ids, not from the sample.',
   'Say how many you are changing, so the user can see the whole set was covered.',
@@ -360,6 +389,7 @@ function snapshotForModel(snapshot: SceneSnapshot): string {
     roomWidthMm: snapshot.roomWidthMm,
     roomDepthMm: snapshot.roomDepthMm,
     groups: snapshot.groups ?? [],
+    selection: snapshot.selection,
   };
 
   const headJson = JSON.stringify(head);

@@ -301,6 +301,37 @@ const snapshotSchema = z.object({
     )
     .max(30)
     .optional(),
+  /*
+   * What the user has highlighted. Small, detailed, and almost always what the
+   * next sentence is about — "make this 5 metres wide" needs it to mean
+   * anything at all.
+   */
+  selection: z
+    .object({
+      count: z.number(),
+      ids: z.array(z.string()).max(500),
+      objects: z
+        .array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            type: z.string(),
+            role: z.string().max(40).optional(),
+            positionMm: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+            rotationDeg: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+            scale: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+            dimensionsMm: z
+              .object({ width: z.number(), depth: z.number(), height: z.number() })
+              .optional(),
+            catalogItemId: z.number().optional(),
+            groupId: z.string().nullable().optional(),
+            groupCount: z.number().optional(),
+            materials: z.array(z.string().max(80)).max(24).optional(),
+          })
+        )
+        .max(8),
+    })
+    .optional(),
 });
 
 const agentBody = z.object({
