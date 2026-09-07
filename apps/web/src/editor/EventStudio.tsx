@@ -30,6 +30,8 @@ import {
   ArrowRight,
   Check,
   Loader2,
+  Mic,
+  MicOff,
   Package,
   Ruler,
   Sparkles,
@@ -46,6 +48,7 @@ import {
 import { useEditor } from './editorStore';
 import { assembleScene, pickItem, type Catalogue } from './assembleScene';
 import { autoResolve, validateAssembly } from './validateAssembly';
+import { useDictation } from './useDictation';
 import { api } from '../lib/api';
 import { spatial } from '../lib/spatialApi';
 import { toast } from '../components/ui';
@@ -564,6 +567,15 @@ function ConceptStage({
   onReadWithModel: () => void;
   onNext: () => void;
 }) {
+  /*
+   * Dictated phrases are appended, not substituted, so someone can type the
+   * start of a brief and speak the rest of it — or correct a word by hand
+   * without losing what they have already said.
+   */
+  const dictation = useDictation((phrase) => {
+    setPrompt(`${prompt}${prompt && !/\s$/.test(prompt) ? ' ' : ''}${phrase}`);
+  });
+
   return (
     <div className="space-y-3">
       <div>
@@ -591,13 +603,50 @@ function ConceptStage({
         </div>
       ) : null}
 
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        rows={5}
-        placeholder="A modern corporate conference for 500 guests with a large stage, an LED screen, round dining tables, a central walkway, blue and white branding and chandeliers…"
-        className="ed-input w-full resize-y text-[12px] leading-relaxed"
-      />
+      <div className="relative">
+        <textarea
+          value={prompt + (dictation.interim ? ` ${dictation.interim}` : '')}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={5}
+          placeholder="A modern corporate conference for 500 guests with a large stage, an LED screen, round dining tables, a central walkway, blue and white branding and chandeliers…"
+          className="ed-input w-full resize-y pr-9 text-[12px] leading-relaxed"
+        />
+
+        {/*
+          Dictation, in the corner of the field it fills.
+          A brief is two or three sentences of plain English, which is quicker
+          to say than to type and is how these events get described out loud
+          anyway. Hidden entirely where the browser cannot do it, rather than
+          shown as a button that fails.
+        */}
+        {dictation.supported ? (
+          <button
+            type="button"
+            onClick={dictation.toggle}
+            aria-label={dictation.listening ? 'Stop dictating' : 'Dictate the brief'}
+            title={dictation.listening ? 'Stop dictating' : 'Dictate the brief'}
+            className={`absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded transition ${
+              dictation.listening
+                ? 'bg-primary text-white'
+                : 'text-ink-muted hover:bg-surface-hover hover:text-ink'
+            }`}
+          >
+            {dictation.listening ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+          </button>
+        ) : null}
+      </div>
+
+      {dictation.listening ? (
+        <p className="flex items-center gap-1.5 text-[10px] text-primary">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+          </span>
+          Listening — say it the way you would to a colleague, then press the microphone again.
+        </p>
+      ) : null}
+
+      {dictation.error ? <p className="text-[10px] text-danger">{dictation.error}</p> : null}
 
       <div className="flex flex-wrap gap-1">
         {EXAMPLES.map((example) => (
