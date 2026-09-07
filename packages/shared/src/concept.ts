@@ -21,6 +21,14 @@ import { DEFAULT_BOOTH_REGULATIONS, generateBoothGrid, type BoothType } from './
 import { fitLedScreen, LED_PRESETS } from './led.js';
 import { LIGHTING_LOOKS } from './lighting.js';
 import { TRUSS_SHAPE_INFO, type TrussShape } from './truss.js';
+import {
+  chairsAroundTable,
+  cornerPositions,
+  layoutAgainstWalls,
+  layoutChandeliers,
+  layoutDining,
+  type Footprint,
+} from './furnish.js';
 
 /* ── The brief ─────────────────────────────────────────────────────────── */
 
@@ -91,6 +99,30 @@ export interface ConceptBrief {
   /** Exhibition only. */
   boothCount: number;
   boothType: BoothType;
+  /**
+   * The rest of the room.
+   *
+   * Everything below was previously dropped on the floor by the parser — a
+   * prompt asking for "branded booths, chandeliers and a central walkway" was
+   * understood as a bare stage. These are the things that make a render look
+   * like an event rather than a seating diagram, so they are part of the brief.
+   */
+  chandeliers: boolean;
+  spotlights: boolean;
+  /** A clear route through the room, in millimetres. 0 for none. */
+  walkwayWidthMm: number;
+  /** Branded banners, logo walls and printed graphics around the room. */
+  branding: boolean;
+  /** Planting and soft decor. */
+  plants: boolean;
+  /** Carpet or a floor finish under the event. */
+  carpet: boolean;
+  /** Soft seating clusters. */
+  lounge: boolean;
+  /** Stands ringing the room rather than gridded in the middle. */
+  boothsAroundPerimeter: boolean;
+  /** Brand colours pulled from the prompt, as hex. Drives banners and lighting. */
+  paletteHex: string[];
   /** Free text kept for the record and shown back to the user. */
   prompt: string;
   /** Words the parser recognised, so the user can see what it understood. */
@@ -117,6 +149,15 @@ export const DEFAULT_BRIEF: ConceptBrief = {
   catering: false,
   boothCount: 0,
   boothType: 'shell-scheme',
+  chandeliers: false,
+  spotlights: false,
+  walkwayWidthMm: 0,
+  branding: false,
+  plants: false,
+  carpet: false,
+  lounge: false,
+  boothsAroundPerimeter: false,
+  paletteHex: [],
   prompt: '',
   understood: [],
   ignored: [],
@@ -144,7 +185,15 @@ const EVENT_WORDS: Keyword<EventKind>[] = [
 
 const SEATING_WORDS: Keyword<SeatingStyle>[] = [
   { words: ['theatre', 'theater', 'rows', 'auditorium'], value: 'theatre' },
-  { words: ['banquet', 'rounds', 'round tables', 'seated dinner'], value: 'banquet' },
+  {
+    // "round dining tables" and "round tables of ten" are the same request as
+    // "banquet"; the words in between should not hide it.
+    words: [
+      'banquet', 'rounds', 'round table', 'round dining', 'dining table',
+      'seated dinner', 'gala dinner', 'dinner table',
+    ],
+    value: 'banquet',
+  },
   { words: ['cabaret'], value: 'cabaret' },
   { words: ['classroom', 'trestle', 'writing'], value: 'classroom' },
   { words: ['standing', 'cocktail', 'reception style'], value: 'standing' },
@@ -197,6 +246,46 @@ function findKeyword<T>(text: string, table: Keyword<T>[], understood: string[])
  * about an event could be either and guessing wrong produces a room for 24
  * people or a 500-metre hall.
  */
+/**
+ * Colour words a brief uses, as hex.
+ *
+ * Event briefs name colours in plain English — "blue and white", "gold and
+ * black" — and those colours are load-bearing: they set the banners, the LED
+ * artwork and the uplighting. The values are the saturated, screen-accurate
+ * versions a designer would reach for, not the CSS keywords, because "blue" on
+ * a banner means a brand blue and not `#0000ff`.
+ */
+const COLOUR_WORDS: Array<{ words: string[]; hex: string }> = [
+  { words: ['blue', 'navy', 'cobalt'], hex: '#0B5FFF' },
+  { words: ['white', 'ivory'], hex: '#F8FAFC' },
+  { words: ['black', 'charcoal'], hex: '#111418' },
+  { words: ['gold', 'golden', 'champagne'], hex: '#C9A227' },
+  { words: ['silver', 'chrome'], hex: '#C0C6CE' },
+  { words: ['red', 'crimson', 'scarlet'], hex: '#D32F2F' },
+  { words: ['green', 'emerald'], hex: '#1E9E62' },
+  { words: ['purple', 'violet', 'magenta'], hex: '#7C3AED' },
+  { words: ['pink', 'rose', 'blush'], hex: '#EC4899' },
+  { words: ['orange', 'amber'], hex: '#F59E0B' },
+  { words: ['teal', 'turquoise'], hex: '#14B8A6' },
+];
+
+function readPalette(text: string, understood: string[]): string[] {
+  const found: string[] = [];
+  for (const entry of COLOUR_WORDS) {
+    for (const word of entry.words) {
+      // Word boundaries: "goldsmith" is not gold, and "reception" is not red.
+      if (new RegExp(`\\b${word}\\b`).test(text)) {
+        if (!found.includes(entry.hex)) {
+          found.push(entry.hex);
+          understood.push(word);
+        }
+        break;
+      }
+    }
+  }
+  return found.slice(0, 4);
+}
+
 export function parseBrief(prompt: string, base: Partial<ConceptBrief> = {}): ConceptBrief {
   const text = ` ${prompt.toLowerCase().replace(/[^\w\s.-]/g, ' ').replace(/\s+/g, ' ')} `;
   const understood: string[] = [];
@@ -259,16 +348,126 @@ export function parseBrief(prompt: string, base: Partial<ConceptBrief> = {}): Co
       : 'standard';
 
   /*
+   * The rest of the room.
+   *
+   * A prompt that asks for "branded booths, chandeliers and a central walkway"
+   * is describing most of what the render will actually show, and all of it
+   * used to fall into `ignored`. Reading these is what turns a seating diagram
+   * into an event.
+   */
+  const chandeliers = has('chandelier', 'chandeliers', 'hanging light', 'pendant');
+  const spotlights = has(
+    'spotlight', 'spotlights', 'moving light', 'moving heads', 'profile',
+    'event lighting', 'professional lighting', 'stage lighting', 'uplighter', 'uplighting'
+  );
+  const branding = has('branding', 'branded', 'brand', 'logo', 'banner', 'signage', 'graphics');
+  const plants = has('plant', 'plants', 'planting', 'greenery', 'floral', 'flowers', 'foliage');
+  const carpet = has('carpet', 'carpeted', 'floor finish', 'rug');
+  const lounge = has('lounge', 'sofa', 'sofas', 'soft seating', 'breakout');
+  const boothsAroundPerimeter = has('around the perimeter', 'around the edge', 'perimeter', 'around the room');
+
+  /*
+   * A walkway. "central walkway" implies one; an explicit width wins.
+   *
+   * 2.4 m is the default because it is the width two people pass comfortably
+   * with a service trolley between them, which is what these routes are for.
+   */
+  const walkwayMatch = text.match(/(\d+(?:\.\d+)?)\s*m(?:etre|eter)?s?\s*(?:wide\s*)?(?:central\s*)?(?:walkway|aisle|gangway|runway)/);
+  const walkwayWidthMm = walkwayMatch
+    ? Math.round(Number(walkwayMatch[1]) * 1000)
+    : has('walkway', 'central aisle', 'centre aisle', 'center aisle', 'gangway', 'runway', 'catwalk')
+      ? 2400
+      : 0;
+  if (walkwayMatch) understood.push(`${walkwayMatch[1]} m walkway`);
+
+  const paletteHex = readPalette(text, understood);
+
+  /*
    * Room size, if the sentence did not give one. Derived from attendance and
    * the seating allowance rather than picked, and laid out on a 3:4 proportion,
    * which is the shape most function rooms are and which puts everyone within a
    * sensible distance of the stage.
    */
   if (!roomWidthMm || !roomDepthMm) {
-    const areaSqM = attendance * SEATING_STYLE_INFO[seating].areaPerPersonSqM * 1.45;
+    /*
+     * 1.45 covers the stage, the gangways and the back-of-house strip for a
+     * plain room. Anything the brief adds around the edges has to be paid for
+     * on top of that, or the derived room is too small for the layout it was
+     * derived from and every run ends in a shortfall warning.
+     *
+     * Stands ring the room at 1.6 m off the wall and 2 m deep, which is a 4.5 m
+     * band on all four sides; a walkway takes a full-width strip. These are the
+     * two that actually change the answer, so they are the two counted.
+     */
+    let allowance = 1.45;
+    if (boothsAroundPerimeter) allowance += 0.35;
+    if (walkwayWidthMm > 0) allowance += 0.1;
+    /*
+     * A dance floor is a hole in the seating, not a use of it: the guests it
+     * serves still need their tables somewhere else. Without paying for it,
+     * a 150-guest wedding derives a room whose whole middle is dance floor
+     * and which then seats thirty.
+     */
+    if (danceFloor) allowance += 0.3;
+
+    const areaSqM = attendance * SEATING_STYLE_INFO[seating].areaPerPersonSqM * allowance;
     const width = Math.sqrt(areaSqM * 0.75);
     roomWidthMm = Math.max(8000, Math.round((width * 1000) / 500) * 500);
     roomDepthMm = Math.max(10000, Math.round(((areaSqM / width) * 1000) / 500) * 500);
+
+    /*
+     * Depth has to hold the stack, not just the area.
+     *
+     * A function room is used front to back: stage, then dance floor, then
+     * tables, then a service strip. Deriving depth from area alone spreads the
+     * room sideways and leaves it too shallow for that stack — a 150-guest
+     * wedding came out 23.5 m deep when the set needs 38 m, and two thirds of
+     * the guests had nowhere to sit. So the stack is measured directly and the
+     * room is deepened to fit it when the area figure falls short.
+     */
+    const TABLE_PITCH_MM = 3800;
+    const roundsHere = seating === 'banquet' || seating === 'cabaret';
+    if (roundsHere) {
+      const stageDepth = stage ? (attendance < 300 ? 3700 : attendance < 800 ? 4900 : 6100) : 0;
+      const danceDepth = danceFloor
+        ? Math.min(8000, Math.max(4000, Math.sqrt(attendance * 0.5) * 1000)) + 2500
+        : 0;
+      /*
+       * A central walkway runs the length of the room, so it costs a whole
+       * column of tables for every row — not a slice of area. Counting it as
+       * area leaves the room a column short from top to bottom.
+       */
+      /*
+       * A central walkway costs more columns than its own width suggests.
+       *
+       * The walkway is a rectangle and a table's claimed footprint is the top
+       * plus its ring of chairs — about 2.9 m. Any grid column whose centre
+       * falls within half a table of the walkway edge is blocked, which for a
+       * 2.4 m route is three columns of a 3.8 m grid, not one. Counting one
+       * left the derived room two columns short in every row.
+       */
+      const walkwayColumns =
+        walkwayWidthMm > 0 ? Math.ceil((walkwayWidthMm + 2900) / TABLE_PITCH_MM) + 1 : 0;
+
+      /*
+       * Pay for the walkway in width, not in depth.
+       *
+       * The columns it costs are lost from every row, so making the room
+       * deeper to compensate just adds rows that are also a walkway short —
+       * a 500-guest room grew to 76 m long and still seated 360. Widening
+       * restores the lost columns directly and keeps the room a shape a venue
+       * would recognise.
+       */
+      if (walkwayColumns > 0) {
+        roomWidthMm += walkwayColumns * TABLE_PITCH_MM;
+      }
+      const widthForTables = roomWidthMm - (boothsAroundPerimeter ? 9000 : 2400);
+      const columns = Math.max(1, Math.floor(widthForTables / TABLE_PITCH_MM) - walkwayColumns);
+      const tableDepth = Math.ceil(Math.ceil(attendance / 10) / columns) * TABLE_PITCH_MM;
+      // Stage clearance at the front, service strip at the back.
+      const stackMm = 1500 + stageDepth + 2000 + danceDepth + tableDepth + 3000;
+      if (stackMm > roomDepthMm) roomDepthMm = Math.round(stackMm / 500) * 500;
+    }
   }
 
   const roomHeightMm =
@@ -309,6 +508,15 @@ export function parseBrief(prompt: string, base: Partial<ConceptBrief> = {}): Co
     catering,
     boothCount,
     boothType: base.boothType ?? DEFAULT_BRIEF.boothType,
+    chandeliers,
+    spotlights,
+    walkwayWidthMm,
+    branding,
+    plants,
+    carpet,
+    lounge,
+    boothsAroundPerimeter,
+    paletteHex,
     prompt,
     understood: [...new Set(understood)],
     ignored,
@@ -317,6 +525,16 @@ export function parseBrief(prompt: string, base: Partial<ConceptBrief> = {}): Co
 
 /* ── The generated concept ─────────────────────────────────────────────── */
 
+/**
+ * What a planned element is.
+ *
+ * The first group are structures the engine sizes from production figures.
+ * The second are *furnished zones*: the plan says how much floor a thing needs
+ * and what goes in it, and the assembly step fills it with real catalogue
+ * objects — individual tables, individual chairs — rather than drawing a
+ * coloured rectangle where furniture ought to be. That distinction is the
+ * difference between a plan you can look at and a plan you can build.
+ */
 export interface ConceptElement {
   kind:
     | 'stage'
@@ -327,7 +545,23 @@ export interface ConceptElement {
     | 'dance-floor'
     | 'bar'
     | 'registration'
-    | 'catering';
+    | 'catering'
+    /** Round tables with chairs around them, laid out and counted. */
+    | 'dining'
+    /** A run of clear floor nothing else may occupy. */
+    | 'walkway'
+    /** Carpet or a floor finish over a region. */
+    | 'carpet'
+    /** A hanging fixture at ceiling trim. */
+    | 'chandelier'
+    /** A moving or fixed light on truss or floor. */
+    | 'spotlight'
+    /** Branding: a banner, a logo wall, a printed graphic. */
+    | 'banner'
+    /** Planting and soft decor. */
+    | 'plant'
+    /** Soft seating: sofas and low tables. */
+    | 'lounge';
   label: string;
   /** Centre of the element in plan millimetres. */
   xMm: number;
@@ -550,12 +784,54 @@ export function generateConcept(brief: ConceptBrief): ConceptResult {
       summary.push(`A ${TRUSS_SHAPE_INFO[brief.truss as TrussShape].label.toLowerCase()} at ${(trimHeight / 1000).toFixed(1)} m trim.`);
     }
 
+    /*
+     * Reserve the dance floor before the seating is laid out.
+     *
+     * The floor goes between the stage and the tables, so the tables have to
+     * start behind it. Placing the floor afterwards — which is what used to
+     * happen — left the seating region starting at the stage and the dance
+     * floor stamped through the middle of it, and a 150-guest wedding seated
+     * sixty.
+     */
+    const danceSideMm = brief.danceFloor
+      ? Math.round(Math.min(8000, Math.max(4000, Math.sqrt(brief.attendance * 0.5) * 1000)))
+      : 0;
+    const danceFloorZ = danceSideMm ? audienceFrontZ + 1000 + danceSideMm / 2 : 0;
+    if (danceSideMm) audienceFrontZ += 1000 + danceSideMm + 1500;
+
     /* ── Seating ─────────────────────────────────────────────────────── */
     if (brief.seating !== 'standing') {
       const perPerson = SEATING_STYLE_INFO[brief.seating].areaPerPersonSqM;
       const neededSqM = brief.attendance * perPerson;
       const availableDepth = halfD - audienceFrontZ - 3000;
-      const seatingDepth = Math.min(availableDepth, (neededSqM * 1_000_000) / (brief.roomWidthMm * 0.8));
+
+      /*
+       * How wide the seating actually gets to be, which is what the depth has
+       * to be derived from. Using a different figure here from the one the
+       * region is built with makes the depth answer a question nobody asked —
+       * it under-reports how deep the set has to be, and the tables run out of
+       * room before the guest count is met.
+       */
+      const seatingWidth = brief.roomWidthMm - (brief.boothsAroundPerimeter ? 9000 : 2400);
+
+      /*
+       * How deep the seating has to be.
+       *
+       * For rows, area over width is the right answer. For rounds it is not:
+       * tables land on a 3.8 m grid, so the depth needed is however many rows
+       * of that grid the guest count takes — and rounding that down to an area
+       * figure can leave a region thinner than a single table, which places no
+       * tables at all however much floor is free.
+       */
+      const TABLE_PITCH_MM = 3800;
+      const rounds = brief.seating === 'banquet' || brief.seating === 'cabaret';
+      const neededDepth = rounds
+        ? Math.ceil(
+            Math.ceil(brief.attendance / 10) / Math.max(1, Math.floor(seatingWidth / TABLE_PITCH_MM))
+          ) * TABLE_PITCH_MM
+        : (neededSqM * 1_000_000) / seatingWidth;
+
+      const seatingDepth = Math.min(availableDepth, neededDepth);
 
       if (seatingDepth > availableDepth * 0.98) {
         warnings.push(
@@ -568,7 +844,19 @@ export function generateConcept(brief: ConceptBrief): ConceptResult {
         label: `${SEATING_STYLE_INFO[brief.seating].label} for ${brief.attendance}`,
         xMm: 0,
         zMm: Math.round(audienceFrontZ + seatingDepth / 2),
-        widthMm: Math.round(brief.roomWidthMm * 0.8),
+        /*
+         * The seating region runs nearly the full width of the room.
+         *
+         * It was 80 %, which on a 29 m room threw away nearly 3 m of usable
+         * floor on each side and cost whole columns of tables. A 1.2 m margin
+         * to the wall is what a banqueting team actually leaves — enough to
+         * walk behind the outermost chairs, and no more.
+         *
+         * Stands around the perimeter are the exception: they stand 1.6 m off
+         * the wall and are 2 m deep, so the seating has to start behind them
+         * or the outermost table column lands inside a stand and is dropped.
+         */
+        widthMm: Math.round(seatingWidth),
         depthMm: Math.round(Math.max(2000, seatingDepth)),
         heightMm: 900,
         rotationDeg: 0,
@@ -619,12 +907,12 @@ export function generateConcept(brief: ConceptBrief): ConceptResult {
       placeBack('catering', 'Catering station', 6000, 900, 900, 'On the back wall with clear access behind it for replenishment.');
     }
     if (brief.danceFloor) {
-      const side = Math.round(Math.min(8000, Math.max(4000, Math.sqrt(brief.attendance * 0.5) * 1000)));
+      const side = danceSideMm;
       elements.push({
         kind: 'dance-floor',
         label: `Dance floor ${(side / 1000).toFixed(1)} m square`,
         xMm: 0,
-        zMm: Math.round(audienceFrontZ + 1000 + side / 2),
+        zMm: Math.round(danceFloorZ),
         widthMm: side,
         depthMm: side,
         heightMm: 25,
@@ -635,6 +923,10 @@ export function generateConcept(brief: ConceptBrief): ConceptResult {
       summary.push(`A ${(side / 1000).toFixed(1)} m dance floor between the stage and the tables.`);
     }
   }
+
+  /* ── Furnishing ────────────────────────────────────────────────────── */
+
+  furnishRoom(brief, elements, summary, warnings);
 
   /* ── Cameras ───────────────────────────────────────────────────────── */
 
@@ -711,3 +1003,307 @@ Rules:
 - Never invent dimensions the user did not give. Use 0 and let the engine derive them.
 - Infer attendance only when the text implies a scale; otherwise use 0.
 - Choose the look from the mood words, not from the event type alone.`;
+
+
+/* -- Furnishing the room ------------------------------------------------ */
+
+/**
+ * Fill the room around the structure.
+ *
+ * By the time this runs, the stage, screen, truss and seating region are
+ * already placed and sized. This pass turns the rest of the brief into real,
+ * positioned elements: the tables that go in the seating region, the route
+ * through them, the fixtures over them, the branding on the walls and the
+ * planting in the corners.
+ *
+ * Everything already placed is registered as a footprint first, so nothing
+ * added here can land on top of it. Order matters within the pass too - the
+ * walkway is claimed before the tables are laid, so the tables part around it
+ * rather than the walkway being cut through a set room.
+ */
+function furnishRoom(
+  brief: ConceptBrief,
+  elements: ConceptElement[],
+  summary: string[],
+  warnings: string[]
+): void {
+  const halfD = brief.roomDepthMm / 2;
+
+  // Everything structural already on the floor is off limits. The seating
+  // region is excluded because it is a region to fill, not an obstacle.
+  const taken: Footprint[] = elements
+    .filter((e) => e.kind !== 'seating')
+    .map((e) => ({
+      xMm: e.xMm,
+      zMm: e.zMm,
+      widthMm: e.widthMm,
+      depthMm: e.depthMm,
+      label: e.label,
+    }));
+
+  const seatingZone = elements.find((e) => e.kind === 'seating');
+
+  /* -- Carpet, first, so everything else sits on top of it ------------- */
+  if (brief.carpet) {
+    elements.push({
+      kind: 'carpet',
+      label: 'Event carpet',
+      xMm: 0,
+      zMm: 0,
+      widthMm: brief.roomWidthMm - 600,
+      depthMm: brief.roomDepthMm - 600,
+      heightMm: 12,
+      rotationDeg: 0,
+      params: { colorHex: brief.paletteHex[0] ?? '#1f2937' },
+      rationale: 'Wall to wall with a 300 mm margin, so the edge is never the first thing a photograph shows.',
+    });
+  }
+
+  /* -- The walkway, claimed before any furniture is laid --------------- */
+  if (brief.walkwayWidthMm > 0 && seatingZone) {
+    const runFromZ = seatingZone.zMm - seatingZone.depthMm / 2;
+    const runToZ = halfD - 1000;
+    const depth = Math.max(2000, runToZ - runFromZ);
+    const walkway = {
+      xMm: 0,
+      zMm: Math.round(runFromZ + depth / 2),
+      widthMm: brief.walkwayWidthMm,
+      depthMm: Math.round(depth),
+    };
+    elements.push({
+      kind: 'walkway',
+      label: 'Central walkway',
+      ...walkway,
+      heightMm: 0,
+      rotationDeg: 0,
+      params: { colorHex: brief.paletteHex[0] ?? '#0B5FFF' },
+      rationale: `A ${(brief.walkwayWidthMm / 1000).toFixed(1)} m route from the entrance to the stage, kept clear of furniture.`,
+    });
+    taken.push({ ...walkway, label: 'Walkway' });
+    summary.push(`A ${(brief.walkwayWidthMm / 1000).toFixed(1)} m central walkway runs to the stage.`);
+  }
+
+  /* -- Stands around the perimeter ------------------------------------- */
+  if (brief.boothsAroundPerimeter) {
+    const count = brief.boothCount > 0 ? brief.boothCount : Math.max(6, Math.round(brief.attendance / 40));
+    const stands = layoutAgainstWalls({
+      roomWidthMm: brief.roomWidthMm,
+      roomDepthMm: brief.roomDepthMm,
+      count,
+      insetMm: 1600,
+      itemWidthMm: 3000,
+      taken,
+    });
+    for (const stand of stands) {
+      elements.push({
+        kind: 'booth-grid',
+        label: `Stand ${stand.index}`,
+        xMm: stand.xMm,
+        zMm: stand.zMm,
+        widthMm: 3000,
+        depthMm: 2000,
+        heightMm: 2500,
+        rotationDeg: stand.rotationDeg,
+        params: {
+          placements: [
+            {
+              centre: { xMm: stand.xMm, zMm: stand.zMm },
+              rotationDeg: stand.rotationDeg,
+              standNumber: String(stand.index),
+            },
+          ],
+          boothType: brief.boothType,
+          widthMm: 3000,
+          depthMm: 2000,
+        },
+        rationale: 'Against the wall facing in, so the floor stays open and every stand is seen from the room.',
+      });
+      taken.push({ xMm: stand.xMm, zMm: stand.zMm, widthMm: 3200, depthMm: 2200, label: `Stand ${stand.index}` });
+    }
+    if (stands.length) summary.push(`${stands.length} branded stands around the perimeter, facing in.`);
+  }
+
+  /* -- Branding -------------------------------------------------------- */
+  if (brief.branding) {
+    const banners = layoutAgainstWalls({
+      roomWidthMm: brief.roomWidthMm,
+      roomDepthMm: brief.roomDepthMm,
+      count: 6,
+      insetMm: 250,
+      itemWidthMm: 2400,
+      taken,
+    });
+    for (const banner of banners) {
+      elements.push({
+        kind: 'banner',
+        label: `Banner ${banner.index}`,
+        xMm: banner.xMm,
+        zMm: banner.zMm,
+        widthMm: 2400,
+        depthMm: 100,
+        heightMm: 3000,
+        rotationDeg: banner.rotationDeg,
+        params: {
+          colorHex: brief.paletteHex[0] ?? '#0B5FFF',
+          accentHex: brief.paletteHex[1] ?? '#F8FAFC',
+        },
+        rationale: 'On the side walls facing in, where a camera catches it without it competing with the screen.',
+      });
+      taken.push({ xMm: banner.xMm, zMm: banner.zMm, widthMm: 2400, depthMm: 600, label: `Banner ${banner.index}` });
+    }
+    if (banners.length) summary.push(`${banners.length} branded banners in the room palette.`);
+  }
+
+  /* -- Chandeliers ----------------------------------------------------- */
+  if (brief.chandeliers) {
+    const points = layoutChandeliers({
+      xMm: 0,
+      zMm: 1000,
+      widthMm: brief.roomWidthMm - 4000,
+      depthMm: brief.roomDepthMm - 6000,
+      roomHeightMm: brief.roomHeightMm,
+      taken,
+    });
+    for (const point of points) {
+      elements.push({
+        kind: 'chandelier',
+        label: `Chandelier ${point.index}`,
+        xMm: point.xMm,
+        zMm: point.zMm,
+        widthMm: 1200,
+        depthMm: 1200,
+        heightMm: point.yMm,
+        rotationDeg: 0,
+        params: { trimMm: point.yMm },
+        rationale: `Hung at ${(point.yMm / 1000).toFixed(1)} m, spaced so the pools of light overlap rather than leaving gaps.`,
+      });
+    }
+    if (points.length) summary.push(`${points.length} chandeliers at ${(points[0]!.yMm / 1000).toFixed(1)} m trim.`);
+  }
+
+  /* -- Stage lighting -------------------------------------------------- */
+  if (brief.spotlights) {
+    const stage = elements.find((e) => e.kind === 'stage');
+    const truss = elements.find((e) => e.kind === 'truss');
+    if (stage) {
+      // Along the truss if there is one, otherwise on the stage line.
+      const spanW = (truss ?? stage).widthMm;
+      const trimMm = truss ? truss.heightMm : 5000;
+      const count = spanW > 12000 ? 8 : 6;
+      for (let i = 0; i < count; i += 1) {
+        const t = i / (count - 1);
+        const xMm = Math.round(-spanW / 2 + spanW * t);
+        elements.push({
+          kind: 'spotlight',
+          label: `Spot ${i + 1}`,
+          xMm,
+          zMm: stage.zMm,
+          widthMm: 350,
+          depthMm: 350,
+          heightMm: trimMm,
+          rotationDeg: 0,
+          params: { trimMm, colorHex: brief.paletteHex[0] ?? '#ffffff' },
+          rationale: 'Spaced along the truss so the wash covers the full width of the stage with no dark centre.',
+        });
+      }
+      summary.push(`${count} moving heads along the truss, washing the stage.`);
+    }
+  }
+
+  /* -- Dining: real tables, in real positions -------------------------- */
+  if (seatingZone && (brief.seating === 'banquet' || brief.seating === 'cabaret')) {
+    const layout = layoutDining({
+      attendance: brief.attendance,
+      xMm: seatingZone.xMm,
+      zMm: seatingZone.zMm,
+      widthMm: seatingZone.widthMm,
+      depthMm: seatingZone.depthMm,
+      taken,
+    });
+
+    for (const table of layout.tables) {
+      const chairs = chairsAroundTable(table, table.seats, layout.tableDiameterMm);
+      elements.push({
+        kind: 'dining',
+        label: `Table ${table.index}`,
+        xMm: table.xMm,
+        zMm: table.zMm,
+        widthMm: layout.tableDiameterMm,
+        depthMm: layout.tableDiameterMm,
+        heightMm: 750,
+        rotationDeg: 0,
+        params: {
+          seats: table.seats,
+          tableDiameterMm: layout.tableDiameterMm,
+          tableIndex: table.index,
+          chairs,
+        },
+        rationale: `One of ${layout.tables.length} rounds, set at a ${(layout.pitchMm / 1000).toFixed(1)} m pitch so service can pass between them.`,
+      });
+      taken.push({
+        xMm: table.xMm,
+        zMm: table.zMm,
+        widthMm: layout.tableDiameterMm + 1100,
+        depthMm: layout.tableDiameterMm + 1100,
+        label: `Table ${table.index}`,
+      });
+    }
+
+    summary.push(
+      `${layout.tables.length} round tables of ${layout.seatsPerTable}, seating ${layout.tables.length * layout.seatsPerTable}.`
+    );
+    if (layout.shortfall > 0) {
+      warnings.push(
+        `Only ${layout.tables.length} of the ${layout.tables.length + layout.shortfall} tables needed for ${brief.attendance} guests fit once the stage and walkway are in. Use a larger room, or seat ${layout.tables.length * layout.seatsPerTable}.`
+      );
+    }
+  }
+
+  /* -- Planting -------------------------------------------------------- */
+  if (brief.plants) {
+    let placed = 0;
+    for (const corner of cornerPositions(brief.roomWidthMm, brief.roomDepthMm)) {
+      elements.push({
+        kind: 'plant',
+        label: `Planting ${placed + 1}`,
+        xMm: corner.xMm,
+        zMm: corner.zMm,
+        widthMm: 900,
+        depthMm: 900,
+        heightMm: 1800,
+        rotationDeg: 0,
+        params: {},
+        rationale: 'In the corners, which no layout uses and every photograph includes.',
+      });
+      placed += 1;
+    }
+    if (placed) summary.push(`${placed} planters softening the corners.`);
+  }
+
+  /* -- Lounge ---------------------------------------------------------- */
+  if (brief.lounge) {
+    const spots = layoutAgainstWalls({
+      roomWidthMm: brief.roomWidthMm,
+      roomDepthMm: brief.roomDepthMm,
+      count: 2,
+      insetMm: 2600,
+      itemWidthMm: 3000,
+      taken,
+    });
+    for (const spot of spots) {
+      elements.push({
+        kind: 'lounge',
+        label: `Lounge ${spot.index}`,
+        xMm: spot.xMm,
+        zMm: spot.zMm,
+        widthMm: 3000,
+        depthMm: 2400,
+        heightMm: 800,
+        rotationDeg: spot.rotationDeg,
+        params: {},
+        rationale: 'Off the main floor, so a conversation is possible without leaving the room.',
+      });
+      taken.push({ xMm: spot.xMm, zMm: spot.zMm, widthMm: 3200, depthMm: 2600, label: `Lounge ${spot.index}` });
+    }
+  }
+}

@@ -23,6 +23,7 @@ export * from './takeoff.js';
 export * from './rates.js';
 export * from './advisor.js';
 export * from './concept.js';
+export * from './furnish.js';
 export * from './walkthrough.js';
 export * from './region.js';
 export * from './venueLibrary.js';
