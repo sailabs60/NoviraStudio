@@ -66,6 +66,7 @@ import { applyFinishes, clearFinishes } from './finishRenderer';
 import { registerPicking } from './picking';
 import { StudioStage3D, ToneMapping } from './StudioStage3D';
 import { DropPreview } from './DropPreview';
+import { InstancedCatalog, useInstancedBatches } from './InstancedCatalog';
 import { beginFloorDrag, registerFloorDrag, useFloorDrag } from './useFloorDrag';
 
 const DEG = Math.PI / 180;
@@ -2242,6 +2243,8 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
   const shadowsWanted = lighting.shadowsEnabled && profile.shadowMapSize > 0;
 
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  // Which objects the instanced renderer has taken responsibility for.
+  const { instancedIds } = useInstancedBatches();
 
   /*
    * Fit the shadow camera to what is actually in the plan.
@@ -2391,8 +2394,21 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
       <GroundClamp orbitRef={orbitRef} />
       <SelectionAnchor />
 
+      {/*
+        Repeated catalogue models, drawn as GPU instances.
+
+        A generated banquet places 480 identical chairs, and one mesh each is
+        the single largest cost in a finished event. Anything in a batch is
+        skipped below; the moment it is selected or given its own material it
+        leaves the batch and is drawn the ordinary way again.
+      */}
+      <ModelBoundary fallback={null} label="instanced-catalog">
+        <InstancedCatalog />
+      </ModelBoundary>
+
       {objects
         .filter((object) => showConstraints || object.type !== 'constraint')
+        .filter((object) => !instancedIds.has(object.id))
         .map((object) => (
           // Boundary per object, not per scene: a single malformed or
           // unloadable object must not be able to unmount the Canvas and take

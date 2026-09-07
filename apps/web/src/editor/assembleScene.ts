@@ -269,6 +269,8 @@ export interface AssemblyReport {
 export function assembleScene(concept: ConceptResult, catalogue: Catalogue): AssemblyReport {
   const objects: SceneObject[] = [];
   const substitutions: string[] = [];
+  // Which spotlight this is, so only the first couple carry shadows.
+  let index = 0;
 
   const note = (message: string) => {
     if (!substitutions.includes(message)) substitutions.push(message);
@@ -474,6 +476,8 @@ export function assembleScene(concept: ConceptResult, catalogue: Catalogue): Ass
               position: { x: element.xMm, y: params.trimMm, z: element.zMm },
               name: element.label,
             }),
+            // House lighting does not cast shadows. See the note below.
+            castShadow: false,
             assemblyRole: 'lighting',
             assemblyElement: 'chandelier',
           } as unknown as SceneObject);
@@ -483,14 +487,29 @@ export function assembleScene(concept: ConceptResult, catalogue: Catalogue): Ass
 
       case 'spotlight': {
         const params = element.params as { trimMm: number; colorHex?: string };
+        /*
+         * Only the first two spots cast shadows.
+         *
+         * Every shadow-casting light is another full pass over the scene, and a
+         * generated event was hanging twenty of them: measured, that was the
+         * single largest cost in the frame — turning them off took a 571-object
+         * plan from 192 ms a frame to 133 ms, more than resolution or geometry
+         * did. It is also how a real rig is lit. A wash of eight moving heads
+         * does not produce eight sets of shadows; one or two key lights carry
+         * the shape and the rest fill, which is why a stage looks lit rather
+         * than looking like a hall of mirrors.
+         */
+        const isKey = index < 2;
         objects.push({
           ...createLight({
             position: { x: element.xMm, y: params.trimMm, z: element.zMm },
             name: element.label,
           }),
+          castShadow: isKey,
           assemblyRole: 'lighting',
           assemblyElement: 'spotlight',
         } as unknown as SceneObject);
+        index += 1;
         break;
       }
 
