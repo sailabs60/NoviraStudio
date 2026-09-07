@@ -44,6 +44,7 @@ import {
 } from '@novira/shared';
 import { useEditor } from './editorStore';
 import { assembleScene, pickItem, type Catalogue } from './assembleScene';
+import { autoResolve, validateAssembly } from './validateAssembly';
 import { api } from '../lib/api';
 import { spatial } from '../lib/spatialApi';
 import { toast } from '../components/ui';
@@ -235,7 +236,38 @@ export function EventStudio({ onClose }: { onClose: () => void }) {
       }
 
       const assembly = assembleScene(concept, catalogue);
-      next.objects.push(...(assembly.objects as SceneObject[]));
+
+      /*
+       * Validate before committing.
+       *
+       * The furnishing pass avoids the obstacles it knows about, but it plans
+       * for a room of a derived size — the venue actually loaded may be
+       * smaller, or shaped differently. Checking the assembled objects against
+       * the real walls is what catches a stand through a wall or a truss above
+       * the ceiling, and it is cheaper to fix here than after it is placed.
+       */
+      const walkway = concept.elements.find((e) => e.kind === 'walkway');
+      const validation = validateAssembly(assembly.objects as SceneObject[], {
+        wallSegments: next.walls.segments,
+        roomHeightMm: concept.roomHeightMm,
+        keepClear: walkway
+          ? [
+              {
+                label: 'Central walkway',
+                xMm: walkway.xMm,
+                zMm: walkway.zMm,
+                widthMm: walkway.widthMm,
+                depthMm: walkway.depthMm,
+              },
+            ]
+          : [],
+      });
+
+      // Impossible placements are removed; overlaps are reported and left, as
+      // two things close together may be exactly what was wanted.
+      const resolved = autoResolve(assembly.objects as SceneObject[], validation);
+
+      next.objects.push(...resolved.kept);
       next.render = { ...next.render, look: concept.look };
 
       const hero = concept.cameras.find((c) => c.name === 'Hero three-quarter') ?? concept.cameras[0];
@@ -248,10 +280,16 @@ export function EventStudio({ onClose }: { onClose: () => void }) {
 
       toast(
         'success',
-        `${assembly.objects.length} objects placed. Every one is selectable and editable — nothing is merged or locked.`,
+        `${resolved.kept.length} objects placed. Every one is selectable and editable — nothing is merged or locked.`,
         { label: 'Undo', onClick: () => useEditor.getState().undo() }
       );
       for (const substitution of assembly.substitutions) toast('info', substitution);
+      if (resolved.removed) {
+        toast('info', `${resolved.removed} objects would not fit the room as loaded, and were left out.`);
+      }
+      for (const issue of validation.issues.filter((i) => i.severity === 'warning')) {
+        toast('info', issue.message);
+      }
       onClose();
     } finally {
       setBuilding(false);
