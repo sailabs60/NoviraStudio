@@ -12,6 +12,7 @@ import { useEditor, type WorkPanel } from './editorStore';
 import { useSelectedObjects } from './selectors';
 import { QuickLayout } from './QuickLayout';
 import { ArtworkProperties, Text3DProperties } from './BrandingProperties';
+import { ReplaceSection } from './ReplaceObject';
 
 /**
  * The properties of whatever is selected.
@@ -94,7 +95,12 @@ export function PropertiesPanel() {
           </section>
 
           {single ? <TransformSection object={single} units={units} onChange={updateObject} readOnly={readOnly} /> : null}
-          {single?.type === 'catalog' ? <DimensionsSection object={single} units={units} /> : null}
+          {single?.type === 'catalog' ? (
+            <DimensionsSection object={single} units={units} onChange={updateObject} readOnly={readOnly} />
+          ) : null}
+          {single?.type === 'catalog' ? (
+            <ReplaceSection object={single as CatalogSceneObject} readOnly={readOnly} />
+          ) : null}
           {/*
             Lettering and printed artwork are edited here rather than handed off:
             their properties — typeface, depth, finish, print size — are
@@ -196,22 +202,93 @@ function TransformSection({
         ))}
       </div>
 
-      <label className="ed-label" htmlFor="rot-y">Rotation · {Math.round(object.rotationDeg.y)}°</label>
-      <input
-        id="rot-y"
-        type="range"
-        min={0}
-        max={359}
-        step={1}
-        value={((object.rotationDeg.y % 360) + 360) % 360}
-        disabled={readOnly || object.locked}
-        className="mb-3 w-full accent-primary"
-        onChange={(e) =>
-          onChange(object.id, {
-            rotationDeg: { ...object.rotationDeg, y: Number(e.target.value) },
-          } as Partial<SceneObject>)
-        }
-      />
+      {/*
+        Rotation, draggable and typeable.
+
+        The slider is the right control for finding an angle by eye, and the
+        wrong one for "face it exactly north" or "square it to that wall" — a
+        one-degree step over 360 pixels means a degree is barely a pixel. Both
+        are here because both are how people actually set an angle.
+      */}
+      <label className="ed-label" htmlFor="rot-y">Rotation</label>
+      <div className="mb-3 flex items-center gap-2">
+        <input
+          id="rot-y"
+          type="range"
+          min={0}
+          max={359}
+          step={1}
+          value={((object.rotationDeg.y % 360) + 360) % 360}
+          disabled={readOnly || object.locked}
+          className="min-w-0 flex-1 accent-primary"
+          onChange={(e) =>
+            onChange(object.id, {
+              rotationDeg: { ...object.rotationDeg, y: Number(e.target.value) },
+            } as Partial<SceneObject>)
+          }
+        />
+        <span className="flex shrink-0 items-center gap-0.5">
+          <input
+            className="ed-field w-14 text-right"
+            disabled={readOnly || object.locked}
+            key={`${object.id}-roty-${Math.round(object.rotationDeg.y)}`}
+            defaultValue={Math.round(((object.rotationDeg.y % 360) + 360) % 360)}
+            onBlur={(e) => {
+              const deg = Number(e.target.value);
+              if (!Number.isFinite(deg)) return;
+              onChange(object.id, {
+                rotationDeg: { ...object.rotationDeg, y: ((deg % 360) + 360) % 360 },
+              } as Partial<SceneObject>);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            }}
+          />
+          <span className="text-[11px] text-ink-subtle">°</span>
+        </span>
+      </div>
+
+      {/*
+        Scale.
+
+        Separate from dimensions on purpose. Dimensions are what the object
+        *is* — a 1.8 m round table — and scale is a multiplier applied on top,
+        which is what a gizmo drag writes. Showing only one of them means either
+        a gizmo drag has no numeric readout, or a real size cannot be typed.
+      */}
+      <label className="ed-label">Scale</label>
+      <div className="mb-3 grid grid-cols-4 gap-1.5">
+        {(['x', 'y', 'z'] as const).map((axis) => (
+          <div key={axis}>
+            <input
+              className="ed-field"
+              aria-label={`Scale ${axis.toUpperCase()}`}
+              disabled={readOnly || object.locked}
+              key={`${object.id}-scale-${axis}-${object.scale[axis]}`}
+              defaultValue={Number((object.scale[axis] ?? 1).toFixed(3))}
+              onBlur={(e) => {
+                const value = Number(e.target.value);
+                if (!Number.isFinite(value) || value <= 0) return;
+                onChange(object.id, {
+                  scale: { ...object.scale, [axis]: clampScaleValue(value) },
+                } as Partial<SceneObject>);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+            />
+          </div>
+        ))}
+        <button
+          type="button"
+          className="ed-action justify-center px-1 text-[10px]"
+          disabled={readOnly || object.locked}
+          title="Back to its real size"
+          onClick={() => onChange(object.id, { scale: { x: 1, y: 1, z: 1 } } as Partial<SceneObject>)}
+        >
+          Reset
+        </button>
+      </div>
 
       <label className="ed-label" htmlFor="opacity">
         Opacity · {Math.round((object.opacity ?? 1) * 100)}%
@@ -231,33 +308,75 @@ function TransformSection({
   );
 }
 
+/**
+ * The object's real size, in millimetres, and editable.
+ *
+ * This used to be a read-only list. It came from a measurement, which is why it
+ * is trustworthy, but a plan is full of things that are *nearly* a catalogue
+ * item — a bar built 400 mm longer, a plinth cut down to fit under a stair —
+ * and the only way to say so was to drag a scale gizmo and read nothing back.
+ * Typing a real dimension is how a person who has measured the thing wants to
+ * enter it.
+ *
+ * Changing one keeps the others, so widening a table does not stretch its
+ * height. Aspect is not locked, deliberately: the objects this is used on are
+ * built to fit a space, and a bar that is longer is not also taller.
+ */
 function DimensionsSection({
   object,
   units,
+  onChange,
+  readOnly,
 }: {
   object: CatalogSceneObject;
   units: 'metric' | 'imperial';
+  onChange: (id: string, patch: Partial<SceneObject>) => void;
+  readOnly: boolean;
 }) {
   const dims = object.dimensionsMm;
   if (!dims) return null;
+
+  const setDimension = (key: 'width' | 'depth' | 'height', raw: string) => {
+    const mm = parseLength(raw, units);
+    if (mm === null || mm <= 0) return;
+    onChange(object.id, {
+      dimensionsMm: { ...dims, [key]: Math.round(mm) },
+    } as Partial<SceneObject>);
+  };
+
   return (
     <section className="ed-section">
       <h3 className="ed-section-title">Real dimensions</h3>
-      <dl className="space-y-1 text-[11px]">
+      <div className="grid grid-cols-3 gap-1.5">
         {([
-          ['Width', dims.width],
-          ['Depth', dims.depth],
-          ['Height', dims.height],
-        ] as const).map(([label, value]) => (
-          <div key={label} className="flex justify-between">
-            <dt className="text-ink-subtle">{label}</dt>
-            <dd className="font-medium text-ink">{formatLength(value, units)}</dd>
+          ['Width', 'width'],
+          ['Depth', 'depth'],
+          ['Height', 'height'],
+        ] as const).map(([label, key]) => (
+          <div key={key}>
+            <label className="ed-label" htmlFor={`dim-${key}`}>{label}</label>
+            <input
+              id={`dim-${key}`}
+              className="ed-field"
+              disabled={readOnly || object.locked}
+              key={`${object.id}-${key}-${dims[key]}`}
+              defaultValue={formatLength(dims[key], units, { bare: true })}
+              onBlur={(e) => setDimension(key, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+            />
           </div>
         ))}
-      </dl>
+      </div>
       <p className="mt-2 text-[10px] leading-relaxed text-ink-subtle">
-        Measured from the model itself when it entered the catalogue, not taken from its title.
+        Measured from the model itself when it entered the catalogue, not taken from its title. Type a
+        different figure to build this one to a size of your own.
       </p>
     </section>
   );
 }
+
+/** Scale stays where an object is still recognisably itself. */
+const clampScaleValue = (value: number): number =>
+  Math.max(0.05, Math.min(20, Number(value.toFixed(4))));
