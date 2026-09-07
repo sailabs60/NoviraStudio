@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { invalidate } from '@react-three/fiber';
 import * as THREE from 'three';
 import { deriveLedScreen, mmToWorld, type LedScreenSceneObject } from '@novira/shared';
@@ -33,6 +33,12 @@ export function LedScreen3D({ screen, selected }: Props) {
   const cabinetH = mmToWorld(panel.heightMm);
   const depth = mmToWorld(panel.depthMm);
   const bottom = mmToWorld(screen.bottomMm);
+
+  const bodiesRef = useRef<THREE.InstancedMesh>(null);
+  const facesRef = useRef<THREE.InstancedMesh>(null);
+  // Allocated up front: an instanced mesh cannot grow, so changing the wall's
+  // size remounts it via the key rather than resizing the buffer in place.
+  const cabinetCount = Math.max(1, screen.columns * screen.rows);
   const totalW = cabinetW * screen.columns;
   const totalH = cabinetH * screen.rows;
 
@@ -97,36 +103,103 @@ export function LedScreen3D({ screen, selected }: Props) {
   const emissiveColor = selected ? '#7c83f5' : screen.contentColor || '#0b1220';
   const glow = Math.max(0, Math.min(3, screen.glowIntensity ?? 0.6)) * (screen.brightness ?? 0.8);
 
+  /*
+   * Place every cabinet.
+   *
+   * Instanced meshes carry their transforms in a matrix buffer rather than in
+   * the React tree, so the positions that used to be props on 360 groups are
+   * written here instead — once, whenever the wall's shape changes.
+   */
+  useEffect(() => {
+    const bodies = bodiesRef.current;
+    const faces = facesRef.current;
+    if (!bodies || !faces) return;
+
+    const matrix = new THREE.Matrix4();
+    const quaternion = new THREE.Quaternion();
+    const euler = new THREE.Euler();
+    const scale = new THREE.Vector3(1, 1, 1);
+    const position = new THREE.Vector3();
+
+    let i = 0;
+    for (const column of columns) {
+      for (let r = 0; r < screen.rows; r += 1) {
+        euler.set(0, column.rotY, 0);
+        quaternion.setFromEuler(euler);
+
+        // The body sits half its depth behind the panel plane; the face a hair
+        // in front of it. Both offsets are along the cabinet's own normal, so
+        // they have to be rotated with it or a curved wall comes apart.
+        const y = cabinetH * (r + 0.5);
+
+        position.set(0, 0, -depth / 2).applyQuaternion(quaternion);
+        matrix.compose(
+          position.set(column.x + position.x, y, column.z + position.z),
+          quaternion,
+          scale
+        );
+        bodies.setMatrixAt(i, matrix);
+
+        position.set(0, 0, 0.002).applyQuaternion(quaternion);
+        matrix.compose(
+          position.set(column.x + position.x, y, column.z + position.z),
+          quaternion,
+          scale
+        );
+        faces.setMatrixAt(i, matrix);
+
+        i += 1;
+      }
+    }
+
+    bodies.count = i;
+    faces.count = i;
+    bodies.instanceMatrix.needsUpdate = true;
+    faces.instanceMatrix.needsUpdate = true;
+    bodies.computeBoundingSphere();
+    faces.computeBoundingSphere();
+    invalidate();
+  }, [columns, screen.rows, cabinetH, depth]);
+
   return (
     <group position={[0, bottom, 0]}>
-      {/* Cabinets. One mesh per column, subdivided by rows for the grid seam. */}
-      {columns.map((column, c) =>
-        Array.from({ length: screen.rows }).map((_, r) => (
-          <group
-            key={`cab-${c}-${r}`}
-            position={[column.x, cabinetH * (r + 0.5), column.z]}
-            rotation={[0, column.rotY, 0]}
-          >
-            {/* The cabinet body: dark, matte, and slightly larger than the face
-                so the seams between cabinets read as physical gaps. */}
-            <mesh castShadow receiveShadow position={[0, 0, -depth / 2]} userData={{ part: 'cabinets' }}>
-              <boxGeometry args={[cabinetW * 0.995, cabinetH * 0.995, depth]} />
-              <meshStandardMaterial color="#15181d" roughness={0.85} metalness={0.2} />
-            </mesh>
-            {/* The emitting face. */}
-            <mesh position={[0, 0, 0.002]} userData={{ part: 'screen-face' }}>
-              <planeGeometry args={[cabinetW * 0.985, cabinetH * 0.985]} />
-              <meshStandardMaterial
-                color={emissiveColor}
-                emissive={emissiveColor}
-                emissiveIntensity={glow}
-                toneMapped={false}
-                roughness={0.4}
-              />
-            </mesh>
-          </group>
-        ))
-      )}
+      {/*
+        Cabinets, drawn as two instanced meshes rather than two per panel.
+
+        A 9 m wall is about 180 cabinets, and a mesh pair each made 364 meshes
+        with 364 materials for a single scene object — enough on its own to
+        drop a generated event to single-figure frame rates. Instancing draws
+        every cabinet body in one call and every emitting face in another, with
+        one material each, and the grid still reads correctly because each
+        instance keeps its own transform.
+      */}
+      <instancedMesh
+        key={`bodies-${cabinetCount}`}
+        ref={bodiesRef}
+        args={[undefined, undefined, cabinetCount]}
+        castShadow
+        receiveShadow
+        userData={{ part: 'cabinets' }}
+      >
+        <boxGeometry args={[cabinetW * 0.995, cabinetH * 0.995, depth]} />
+        <meshStandardMaterial color="#15181d" roughness={0.85} metalness={0.2} />
+      </instancedMesh>
+
+      <instancedMesh
+        key={`faces-${cabinetCount}`}
+        ref={facesRef}
+        args={[undefined, undefined, cabinetCount]}
+        userData={{ part: 'screen-face' }}
+      >
+        <planeGeometry args={[cabinetW * 0.985, cabinetH * 0.985]} />
+        <meshStandardMaterial
+          color={emissiveColor}
+          emissive={emissiveColor}
+          emissiveIntensity={glow}
+          toneMapped={false}
+          roughness={0.4}
+        />
+      </instancedMesh>
 
       {/* Content, drawn across the whole wall rather than per cabinet. */}
       {screen.contentUrl ? (

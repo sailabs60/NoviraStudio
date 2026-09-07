@@ -1,4 +1,6 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import * as THREE from 'three';
+import { invalidate } from '@react-three/fiber';
 import {
   DECK_SIZE_MM,
   RAIL_TYPE_THRESHOLD_MM,
@@ -82,27 +84,55 @@ export function Stage3D({ stage, selected }: Props) {
   const skirtColor = stage.skirtColor ?? '#23262b';
   const frameColor = '#9aa0a8';
 
+  const deckRef = useRef<THREE.InstancedMesh>(null);
+  const deckCount = Math.max(1, stage.deckRows * stage.deckColumns);
+
+  // Place every deck module. Positions live in the matrix buffer rather than
+  // as props on a few hundred React elements.
+  useEffect(() => {
+    const mesh = deckRef.current;
+    if (!mesh) return;
+    const matrix = new THREE.Matrix4();
+    let i = 0;
+    for (let row = 0; row < stage.deckRows; row += 1) {
+      for (let col = 0; col < stage.deckColumns; col += 1) {
+        matrix.makeTranslation(
+          -halfW + (col + 0.5) * deck,
+          height - deckThickness / 2,
+          -halfD + (row + 0.5) * deck
+        );
+        mesh.setMatrixAt(i, matrix);
+        i += 1;
+      }
+    }
+    mesh.count = i;
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+    invalidate();
+  }, [stage.deckRows, stage.deckColumns, deck, halfW, halfD, height, deckThickness]);
+
   return (
     <group>
-      {/* Deck surface — one slab per module so the grid reads. */}
-      {Array.from({ length: stage.deckRows }).flatMap((_, row) =>
-        Array.from({ length: stage.deckColumns }).map((__, col) => (
-          <mesh
-            key={`deck-${row}-${col}`}
-            position={[
-              -halfW + (col + 0.5) * deck,
-              height - deckThickness / 2,
-              -halfD + (row + 0.5) * deck,
-            ]}
-            castShadow
-            receiveShadow
-            userData={{ part: 'deck' }}
-          >
-            <boxGeometry args={[deck * 0.995, deckThickness, deck * 0.995]} />
-            <meshStandardMaterial color={deckColor} roughness={0.85} />
-          </mesh>
-        ))
-      )}
+      {/*
+        Deck surface — one slab per module so the grid reads.
+
+        Instanced: a large stage is a few hundred modules, and a mesh each made
+        the stage the single heaviest object in a generated event. The slabs
+        are identical and differ only in position, which is exactly what an
+        instanced mesh is for; the grid still reads because each instance keeps
+        its own transform.
+      */}
+      <instancedMesh
+        key={`deck-${deckCount}`}
+        ref={deckRef}
+        args={[undefined, undefined, deckCount]}
+        castShadow
+        receiveShadow
+        userData={{ part: 'deck' }}
+      >
+        <boxGeometry args={[deck * 0.995, deckThickness, deck * 0.995]} />
+        <meshStandardMaterial color={deckColor} roughness={0.85} />
+      </instancedMesh>
 
       {/*
         The aluminium edge frame around every deck. This is what makes the
