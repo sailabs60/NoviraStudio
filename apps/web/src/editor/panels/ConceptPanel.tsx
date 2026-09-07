@@ -15,6 +15,8 @@ import {
 } from '@novira/shared';
 import { useEditor } from '../editorStore';
 import { createBooth, createLedScreen, createTruss, newId } from '../factories';
+import { assembleScene } from '../assembleScene';
+import { api } from '../../lib/api';
 import { pollJob, spatial, type PhotoAnalysisResult } from '../../lib/spatialApi';
 import {
   EmptyState,
@@ -93,6 +95,26 @@ function ConceptFromText() {
     staleTime: 120_000,
   });
 
+  /*
+   * The catalogue the layout is furnished from.
+   *
+   * Loaded up front rather than per element: a 500-guest banquet asks for a
+   * round table and a chair once each, but it asks 48 and 480 times over, and
+   * a query per placement would take longer than the whole rest of the build.
+   * One page of each relevant category is plenty to choose from.
+   */
+  const { data: catalogue } = useQuery({
+    queryKey: ['concept-catalogue'],
+    queryFn: async () => {
+      const categories = ['tables', 'chairs', 'decor', 'signage', 'plants', 'lounge', 'bars-catering'];
+      const pages = await Promise.all(
+        categories.map((category) => api.catalog.items({ category, limit: 100 } as never).catch(() => ({ items: [] })))
+      );
+      return pages.flatMap((page) => page.items ?? []);
+    },
+    staleTime: 300_000,
+  });
+
   const capability = capabilities?.ai_concept;
 
   /** The free path: parse locally and derive the layout. Instant, no credits. */
@@ -145,7 +167,15 @@ function ConceptFromText() {
       next.walls = { segments: room.segments, floors: [{ ...room.floor, color: '#3f3f46' }] };
     }
 
-    next.objects.push(...objectsFromConcept(active));
+    /*
+     * Furnish from the catalogue where it can, and fall back where it cannot.
+     *
+     * This is the step that turns a plan into an event: the seating region
+     * becomes 48 round tables with ten chairs each, every one an independent
+     * object with its own id and transform, rather than a grey rectangle.
+     */
+    const assembly = assembleScene(active, { items: catalogue ?? [] });
+    next.objects.push(...assembly.objects);
     next.render = { ...next.render, look: active.look };
 
     // Camera: the hero angle, so the plan opens looking like the thing that was
@@ -157,10 +187,14 @@ function ConceptFromText() {
 
     replaceScene(next);
     requestFrameAll();
-    toast('success', `${active.elements.length} elements placed. Everything is editable — nothing is locked.`, {
-      label: 'Undo',
-      onClick: () => useEditor.getState().undo(),
-    });
+    // Report objects, not plan elements: one "seating" element becomes 48
+    // tables and 480 chairs, and the object count is what the user now has.
+    toast(
+      'success',
+      `${assembly.objects.length} objects placed. Every one is selectable and editable — nothing is locked or merged.`,
+      { label: 'Undo', onClick: () => useEditor.getState().undo() }
+    );
+    for (const substitution of assembly.substitutions) toast('info', substitution);
   };
 
   return (
