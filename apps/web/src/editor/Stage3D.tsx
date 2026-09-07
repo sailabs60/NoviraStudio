@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
+import { sharedMaterial } from './sharedMaterials';
 import * as THREE from 'three';
 import { invalidate } from '@react-three/fiber';
 import {
@@ -155,7 +156,10 @@ export function Stage3D({ stage, selected }: Props) {
                   userData={{ part: 'deck-frame' }}
                 >
                   <boxGeometry args={[deck, deckThickness * 1.05, rail]} />
-                  <meshStandardMaterial color={frameColor} metalness={0.72} roughness={0.34} />
+                  <primitive
+                    object={sharedMaterial({ color: frameColor, metalness: 0.72, roughness: 0.34 })}
+                    attach="material"
+                  />
                 </mesh>
               ))}
               {([-1, 1] as const).map((s) => (
@@ -166,7 +170,10 @@ export function Stage3D({ stage, selected }: Props) {
                   userData={{ part: 'deck-frame' }}
                 >
                   <boxGeometry args={[rail, deckThickness * 1.05, deck]} />
-                  <meshStandardMaterial color={frameColor} metalness={0.72} roughness={0.34} />
+                  <primitive
+                    object={sharedMaterial({ color: frameColor, metalness: 0.72, roughness: 0.34 })}
+                    attach="material"
+                  />
                 </mesh>
               ))}
             </group>
@@ -185,7 +192,10 @@ export function Stage3D({ stage, selected }: Props) {
                 userData={{ part: 'legs' }}
               >
                 <boxGeometry args={[mmToWorld(50), height - deckThickness, mmToWorld(50)]} />
-                <meshStandardMaterial color="#7d838c" metalness={0.7} roughness={0.35} />
+                <primitive
+                  object={sharedMaterial({ color: '#7d838c', metalness: 0.7, roughness: 0.35 })}
+                  attach="material"
+                />
               </mesh>
             ))
           )

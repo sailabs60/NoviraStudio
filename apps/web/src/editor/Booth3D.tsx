@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { sharedMaterial } from './sharedMaterials';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
 import {
@@ -157,7 +158,14 @@ export function Booth3D({ booth, selected }: Props) {
                   userData={{ part: 'system-frame' }}
                 >
                   <boxGeometry args={[post, heightM, post]} />
-                  <meshStandardMaterial color="#c3c8cf" metalness={0.7} roughness={0.32} />
+                  {/*
+                    Shared: every post on every stand is the same grey metal,
+                    and a separate material each is what stops them batching.
+                  */}
+                  <primitive
+                    object={sharedMaterial({ color: '#c3c8cf', metalness: 0.7, roughness: 0.32 })}
+                    attach="material"
+                  />
                 </mesh>
               );
             });
