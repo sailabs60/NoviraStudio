@@ -216,12 +216,49 @@ export function generateDeck(source: DeckSource): PresentationDeck {
   if (summary.trussLengthM) conceptBullets.push(`${summary.trussLengthM.toFixed(1)} m of truss.`);
   if (summary.fixtureCount) conceptBullets.push(`${summary.fixtureCount} lighting fixtures.`);
 
+  /*
+   * Use the brief the plan was built from, when there is one.
+   *
+   * This page used to tell the designer to "describe the idea in your own
+   * words" — for a generated plan that meant retyping what the engine had
+   * already written, including the reason behind every decision, which is the
+   * part a client actually reads. A hand-drawn plan has no brief and keeps the
+   * prompt to write one.
+   */
+  const brief = source.scene.designBrief ?? null;
+
   add(
     'concept',
     'The concept',
-    'Describe the idea in your own words — what the guest experiences, and why this layout delivers it. Everything below is measured from the drawing.',
-    { bullets: conceptBullets }
+    brief
+      ? brief.prompt
+      : 'Describe the idea in your own words — what the guest experiences, and why this layout delivers it. Everything below is measured from the drawing.',
+    { bullets: brief ? [...brief.summary, ...conceptBullets].slice(0, 10) : conceptBullets }
   );
+
+  /*
+   * Why it is laid out this way.
+   *
+   * The engine records a reason for every element it places — why the stage is
+   * that size, why the tables sit at a 3.8 m pitch, why the truss trims where
+   * it does. Those sentences are what turn a drawing into an argument, and a
+   * proposal that can answer "why is the stage there" wins work that one which
+   * only shows the stage does not.
+   */
+  if (brief && Object.keys(brief.rationale).length) {
+    add('concept', 'Why it is laid out this way', 'Every decision below was calculated from the room and the guest count.', {
+      bullets: Object.entries(brief.rationale)
+        .map(([kind, reason]) => `${kind.replace(/-/g, ' ')}: ${reason}`)
+        .slice(0, 8),
+    });
+  }
+
+  // Anything the layout could not satisfy, said plainly rather than buried.
+  if (brief && brief.warnings.length) {
+    add('concept', 'Worth knowing', 'Stated when the layout was generated, so it is on the record.', {
+      bullets: brief.warnings.slice(0, 5),
+    });
+  }
 
   /* ── Renders ─────────────────────────────────────────────────────────── */
 

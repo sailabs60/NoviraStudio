@@ -791,6 +791,46 @@ export interface SceneDocument {
    * Null leaves the floor as it is: an open hall floor, or the venue's own.
    */
   floorFinish?: SurfaceFinish | null;
+
+  /**
+   * What this layout was designed to be, and why.
+   *
+   * Recorded when a plan is generated from a brief, and kept with the plan
+   * afterwards. The reason it lives on the document rather than in the Studio's
+   * own state is that everything downstream needs it and none of it can
+   * recover it: a proposal's concept page, a client's share link, and the
+   * assistant reading the plan a week later all want the sentence the room was
+   * built from, and measuring the geometry cannot tell you a room is "a modern
+   * corporate technology conference" — only that it has 48 round tables.
+   *
+   * Absent on plans drawn by hand, which is the honest answer for those.
+   */
+  designBrief?: DesignBrief | null;
+}
+
+/** The brief a generated plan was built from, kept with the plan. */
+export interface DesignBrief {
+  /** What the user actually typed. */
+  prompt: string;
+  /** Whether a language model read it, or the built-in parser did. */
+  interpreter: 'model' | 'parser';
+  /** Plain-English account of what was laid out, one line each. */
+  summary: string[];
+  /** Anything the engine could not satisfy, stated at the time. */
+  warnings: string[];
+  /** Why each kind of element is where it is, keyed by element kind. */
+  rationale: Record<string, string>;
+  /** The room it was planned for. */
+  roomWidthMm: number;
+  roomDepthMm: number;
+  roomHeightMm: number;
+  eventKind: string;
+  attendance: number;
+  seating: string;
+  /** Brand colours read from the brief, as hex. */
+  paletteHex: string[];
+  /** When it was generated. Epoch milliseconds. */
+  at: number;
 }
 
 /**

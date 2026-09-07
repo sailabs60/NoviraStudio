@@ -347,6 +347,36 @@ export function EventStudio({ onClose }: { onClose: () => void }) {
       next.objects.push(...resolved.kept);
       next.render = { ...next.render, look: concept.look };
 
+      /*
+       * Keep the brief with the plan.
+       *
+       * Everything downstream wants it and nothing downstream can recover it.
+       * A proposal's concept page currently says "describe the idea in your own
+       * words" and leaves a designer to retype what the AI already wrote,
+       * including the reason for every decision; the assistant reading this
+       * plan next week can measure 48 round tables but cannot tell they are a
+       * technology conference. Measuring geometry does not give you intent.
+       */
+      const rationale: Record<string, string> = {};
+      for (const element of concept.elements) {
+        if (!rationale[element.kind]) rationale[element.kind] = element.rationale;
+      }
+      next.designBrief = {
+        prompt: prompt.trim(),
+        interpreter,
+        summary: concept.summary,
+        warnings: concept.warnings,
+        rationale,
+        roomWidthMm: concept.roomWidthMm,
+        roomDepthMm: concept.roomDepthMm,
+        roomHeightMm: concept.roomHeightMm,
+        eventKind: concept.brief.eventKind,
+        attendance: concept.brief.attendance,
+        seating: concept.brief.seating,
+        paletteHex: concept.brief.paletteHex,
+        at: Date.now(),
+      };
+
       const hero = concept.cameras.find((c) => c.name === 'Hero three-quarter') ?? concept.cameras[0];
       if (hero) {
         next.camera = { ...next.camera, positionMm: hero.positionMm, targetMm: hero.targetMm, fov: hero.fov };
