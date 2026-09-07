@@ -71,12 +71,43 @@ export function BottomToolbar({
 
   const [importOpen, setImportOpen] = useState(false);
 
-  const barRef = useRef<HTMLDivElement>(null);
+  /*
+   * Measure the space the bar has, not the bar.
+   *
+   * This used to observe the scrolling element itself, and that is a feedback
+   * loop: the measured width decides which labels are shown, hiding a label
+   * narrows the content, the horizontal scrollbar disappears, the content box
+   * grows by the scrollbar's width, the label comes back — and the bar shakes
+   * at a few frames a second. It only bites in the narrow band where a label
+   * decides whether the bar overflows at all, and only where scrollbars take
+   * real space, which is why it is invisible on overlay-scrollbar platforms
+   * and obvious on Windows.
+   *
+   * The wrapper never scrolls, so its width depends only on the window and
+   * the sidebars — nothing this component can change. Measuring that breaks
+   * the loop at its source rather than damping it.
+   */
+  const frameRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(1200);
   useEffect(() => {
-    const node = barRef.current;
+    const node = frameRef.current;
     if (!node || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+
+    const observer = new ResizeObserver(([entry]) => {
+      const next = entry.contentRect.width;
+      setWidth((current) => {
+        /*
+         * Ignore sub-pixel jitter.
+         *
+         * A fractional layout width can oscillate by a hair between frames,
+         * and a breakpoint sitting on that boundary would flip with it. Two
+         * pixels is well below anything a person resizes by and well above
+         * the noise. A second line of defence: the wrapper alone should be
+         * enough, and this costs nothing.
+         */
+        return Math.abs(current - next) < 2 ? current : next;
+      });
+    });
     observer.observe(node);
     setWidth(node.clientWidth);
     return () => observer.disconnect();
@@ -117,10 +148,10 @@ export function BottomToolbar({
         max={160}
         label="Toolbar height"
       />
+    <div ref={frameRef} className="shrink-0 border-t border-line bg-surface" style={{ height }}>
     <div
-      ref={barRef}
-      style={{ height }}
-      className={`flex shrink-0 items-center gap-1 border-t border-line bg-surface px-2 ${
+      style={{ height: '100%' }}
+      className={`flex items-center gap-1 px-2 ${
         height > 60 ? 'flex-wrap content-center overflow-y-auto py-1' : 'overflow-x-auto'
       }`}
     >
@@ -285,6 +316,7 @@ export function BottomToolbar({
       </div>
 
       <ImportFlow open={importOpen} onClose={() => setImportOpen(false)} />
+    </div>
     </div>
     </>
   );
