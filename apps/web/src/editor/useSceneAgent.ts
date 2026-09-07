@@ -255,6 +255,26 @@ function sizeOf(object: SceneObject) {
  * rearranges a plan is alarming; one that says "moved the Dining Chair to the
  * table" leaves the user in charge of deciding whether that was right.
  */
+/**
+ * The spacing an existing arrangement uses.
+ *
+ * Taken from the closest pair of anchors rather than from an average, because a
+ * room with a walkway through it has two spacings and only the tight one is the
+ * pitch — averaging them would put every added table half a gangway out of line.
+ * Returns null when there is nothing to learn from.
+ */
+function nearestPitch(anchors: Array<{ x: number; z: number }>): number | null {
+  if (anchors.length < 2) return null;
+  let best = Infinity;
+  for (let i = 0; i < anchors.length; i += 1) {
+    for (let j = i + 1; j < anchors.length; j += 1) {
+      const d = Math.hypot(anchors[i]!.x - anchors[j]!.x, anchors[i]!.z - anchors[j]!.z);
+      if (d > 100 && d < best) best = d;
+    }
+  }
+  return Number.isFinite(best) ? Math.round(best) : null;
+}
+
 /** "the 480 chairs" / "the stage" — how a person would refer to what changed. */
 function describe(objects: SceneObject[]): string {
   if (objects.length === 1) return objects[0]!.name ?? objects[0]!.type;
@@ -563,44 +583,107 @@ async function apply(operation: AgentOperation): Promise<string | null> {
     /**
      * Add more of something already in the plan.
      *
-     * "Add 50 more chairs" needs somewhere to put them. They are laid out in a
-     * block beside the set they copy, at that set's own spacing, so they arrive
-     * ordered and visible rather than stacked on the original.
+     * "Add 50 more chairs" at a banquet does not mean fifty loose chairs in a
+     * block. It means the room now seats fifty more people, which is five more
+     * tables with ten chairs around each — and they belong on the same grid as
+     * the ones already laid, not stacked beside them.
+     *
+     * So this reads what the existing set is: if the thing being added is part
+     * of a table group, the whole group is repeated and the count is read as
+     * guests. Anything else is copied straight, laid on the same pitch the
+     * existing copies use and continued into the free floor behind them.
      */
     case 'add_more': {
       const source = editor.scene.objects.find((o) => o.id === operation.likeId);
       if (!source) return null;
-      const count = Math.min(Math.max(1, Math.round(operation.count)), 500);
 
-      // Spacing from the source's own footprint, so chairs pack like chairs and
-      // tables like tables.
-      const size = (source as { dimensionsMm?: { width: number; depth: number } }).dimensionsMm;
-      const spacing = Math.max(700, Math.round((size?.width ?? 800) * 1.35));
+      const asked = Math.min(Math.max(1, Math.round(operation.count)), 600);
+      const group = (source as { groupId?: string | null }).groupId ?? null;
+      const members = group
+        ? editor.scene.objects.filter((o) => (o as { groupId?: string | null }).groupId === group)
+        : [];
 
-      // Beside the existing set rather than on top of it.
-      const peers = editor.scene.objects.filter(
-        (o) => (o as { catalogItemId?: number }).catalogItemId === (source as { catalogItemId?: number }).catalogItemId
+      /*
+       * A seated set: repeat the whole arrangement, not the one object.
+       *
+       * The group is a table and its chairs, so "50 more chairs" is five more
+       * of these. Copying the table with its ring intact is what keeps the
+       * result a laid room rather than furniture in a heap.
+       */
+      const seats = members.filter((o) => (o as { generatedRole?: string }).generatedRole === 'chair').length;
+      const repeatWholeGroup = members.length > 1 && seats > 0;
+
+      const template = repeatWholeGroup ? members : [source];
+      const sets = repeatWholeGroup ? Math.max(1, Math.ceil(asked / seats)) : asked;
+
+      // The centre of the template, so copies can be offset as a unit.
+      const centre = template.reduce(
+        (acc, o) => ({ x: acc.x + o.positionMm.x / template.length, z: acc.z + o.positionMm.z / template.length }),
+        { x: 0, z: 0 }
       );
-      const rightEdge = peers.reduce((max, o) => Math.max(max, o.positionMm.x), source.positionMm.x);
 
-      const columns = Math.max(1, Math.ceil(Math.sqrt(count)));
-      const copies: SceneObject[] = Array.from({ length: count }, (_, index) => {
-        const column = index % columns;
-        const row = Math.floor(index / columns);
-        return {
-          ...structuredClone(source),
-          id: crypto.randomUUID(),
-          // A fresh group: these are new, not members of the set they copy.
-          groupId: null,
-          positionMm: {
-            x: Math.round(rightEdge + spacing * (column + 2)),
-            y: source.positionMm.y,
-            z: Math.round(source.positionMm.z + spacing * row),
-          },
-        } as SceneObject;
-      });
+      /*
+       * Where they go.
+       *
+       * The pitch comes from the two nearest existing copies rather than from a
+       * guess, so added tables sit on the same grid as the laid ones. Rows
+       * continue behind the set — away from the stage, which is at negative z —
+       * because that is the free floor and it is where a banqueting team would
+       * put them.
+       */
+      const anchors = repeatWholeGroup
+        ? [
+            ...new Set(
+              editor.scene.objects
+                .filter((o) => (o as { generatedRole?: string }).generatedRole === 'table')
+                .map((o) => `${o.positionMm.x}|${o.positionMm.z}`)
+            ),
+          ].map((k) => {
+            const [x, z] = k.split('|').map(Number);
+            return { x: x!, z: z! };
+          })
+        : editor.scene.objects
+            .filter(
+              (o) => (o as { catalogItemId?: number }).catalogItemId === (source as { catalogItemId?: number }).catalogItemId
+            )
+            .map((o) => ({ x: o.positionMm.x, z: o.positionMm.z }));
+
+      const pitch = nearestPitch(anchors) ?? Math.max(900, Math.round(sizeOf(source).widthMm ?? 900) + 900);
+      const backEdge = anchors.length ? Math.max(...anchors.map((a) => a.z)) : centre.z;
+      const xs = anchors.length ? anchors.map((a) => a.x) : [centre.x];
+      const left = Math.min(...xs);
+      const columns = Math.max(1, Math.round((Math.max(...xs) - left) / pitch) + 1);
+
+      const copies: SceneObject[] = [];
+      for (let i = 0; i < sets; i += 1) {
+        const column = i % columns;
+        const row = Math.floor(i / columns) + 1;
+        const dx = left + column * pitch - centre.x;
+        const dz = backEdge + row * pitch - centre.z;
+
+        // One new group per copied set, so the copies are sets in their own
+        // right rather than members of the one they came from.
+        const newGroup = repeatWholeGroup ? crypto.randomUUID() : null;
+        for (const member of template) {
+          copies.push({
+            ...structuredClone(member),
+            id: crypto.randomUUID(),
+            ...(newGroup ? { groupId: newGroup } : { groupId: null }),
+            positionMm: {
+              x: Math.round(member.positionMm.x + dx),
+              y: member.positionMm.y,
+              z: Math.round(member.positionMm.z + dz),
+            },
+          } as SceneObject);
+        }
+      }
+
       editor.addObjects(copies);
-      return `Added ${count} more ${source.name ?? source.type}, in a block beside the existing ones.`;
+
+      if (repeatWholeGroup) {
+        return `Added ${sets} more ${sets === 1 ? 'table' : 'tables'} of ${seats}, seating ${sets * seats} — laid on the same grid as the others.`;
+      }
+      return `Added ${sets} more ${source.name ?? source.type}, continuing the existing arrangement.`;
     }
 
     case 'focus': {
