@@ -74,11 +74,25 @@ const EXAMPLES = [
   'A product launch for 200 press with dramatic lighting, a reveal position and a lounge area',
 ];
 
+/**
+ * A version name from the prompt that produced it.
+ *
+ * "A modern corporate technology conference for 500 guests with a large
+ * stage…" is the whole brief; the useful label is its first clause, which is
+ * what distinguishes one attempt from the next in a list.
+ */
+function promptSummary(prompt: string): string {
+  const first = prompt.trim().split(/[.,;]/)[0]?.trim() ?? '';
+  if (!first) return '';
+  return first.length > 52 ? `${first.slice(0, 49)}…` : first;
+}
+
 export function EventStudio({ onClose }: { onClose: () => void }) {
   const scene = useEditor((s) => s.scene);
   const replaceScene = useEditor((s) => s.replaceScene);
   const requestFrameAll = useEditor((s) => s.requestFrameAll);
   const readOnly = useEditor((s) => s.readOnly);
+  const planId = useEditor((s) => s.planId);
 
   const [stage, setStage] = useState<Stage>('concept');
   const [prompt, setPrompt] = useState('');
@@ -340,6 +354,41 @@ export function EventStudio({ onClose }: { onClose: () => void }) {
 
       replaceScene(next);
       requestFrameAll();
+
+      /*
+       * Record the plan as it stood before this, and as it stands after.
+       *
+       * Building an event replaces most of a plan, and undo is one step back
+       * that a few more edits will bury. A pair of named versions is what makes
+       * trying a second concept safe: the first is still there to come back to
+       * and to compare against. Saved to the server rather than to memory, so
+       * they survive a reload and the Review panel can already show, restore
+       * and diff them.
+       */
+      if (planId) {
+        const before = scene.objects.length;
+        void (async () => {
+          try {
+            if (before) {
+              await spatial.versions.create(planId, {
+                label: 'Before the AI build',
+                note: `${before} objects`,
+                reason: 'before_ai',
+                scene,
+              });
+            }
+            await spatial.versions.create(planId, {
+              label: promptSummary(prompt) || 'AI build',
+              note: `${resolved.kept.length} objects · ${(concept.roomWidthMm / 1000).toFixed(1)} × ${(concept.roomDepthMm / 1000).toFixed(1)} m`,
+              reason: 'milestone',
+              scene: next,
+            });
+          } catch {
+            // A version is a convenience; failing to record one must never
+            // cost the user the build they just asked for.
+          }
+        })();
+      }
 
       toast(
         'success',
