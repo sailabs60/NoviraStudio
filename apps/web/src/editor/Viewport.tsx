@@ -152,24 +152,42 @@ function LoadedModel({
 
   /*
    * Each placement needs its own copy of the graph — the same catalogue model
-   * may appear a hundred times in one plan and they must not share transforms
-   * or material overrides.
+   * may appear a hundred times in one plan and they must not share transforms.
+   *
+   * The *materials*, though, are only copied when this placement is actually
+   * going to change one. Cloning unconditionally gave every object its own
+   * material, so a 500-guest banquet built 1857 materials for 1857 meshes:
+   * nothing could batch, every mesh became its own draw call with its own
+   * shader state, and the viewport fell from 42 frames per second to 5 — on
+   * a scene of only 53,000 triangles, which is nothing. Sharing the loader's
+   * material between identical placements is what makes 480 copies of the same
+   * chair cost about what one costs.
+   *
+   * Anything that writes to a material has to opt in here, or it would write
+   * through to every other placement of the same model.
    */
+  const needsOwnMaterial = Boolean(
+    selected ||
+      (object.opacity ?? 1) < 1 ||
+      object.materialColors ||
+      (object.finishes && Object.keys(object.finishes).length)
+  );
+
   const instance = useMemo(() => {
     const copy = scene.clone(true);
     copy.traverse((node) => {
       if (node instanceof THREE.Mesh) {
         node.castShadow = true;
         node.receiveShadow = true;
-        node.material = (node.material as THREE.Material).clone();
+        if (needsOwnMaterial) node.material = (node.material as THREE.Material).clone();
       }
     });
     return copy;
-  }, [scene]);
+  }, [scene, needsOwnMaterial]);
 
   // Per-material colour overrides, applied by glTF material name.
   useEffect(() => {
-    if (!object.materialColors) return;
+    if (!object.materialColors || !needsOwnMaterial) return;
     instance.traverse((node) => {
       if (!(node instanceof THREE.Mesh)) return;
       const material = node.material as THREE.MeshStandardMaterial;
@@ -179,6 +197,9 @@ function LoadedModel({
   }, [instance, object.materialColors]);
 
   useEffect(() => {
+    // Writing these onto a shared material would tint every other copy of the
+    // same model, so it is only safe once this placement owns one.
+    if (!needsOwnMaterial) return;
     instance.traverse((node) => {
       if (node instanceof THREE.Mesh) {
         const material = node.material as THREE.MeshStandardMaterial;
@@ -188,7 +209,7 @@ function LoadedModel({
         material.emissiveIntensity = selected ? 0.22 : 0;
       }
     });
-  }, [instance, selected, object.opacity]);
+  }, [instance, selected, object.opacity, needsOwnMaterial]);
 
   /*
    * A building, once it is actually here, gets the camera pulled back to it.
