@@ -1,10 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, Eye, EyeOff, LayoutDashboard, Library, Loader2, Lock, Palette, Sparkles, Upload, Wand2, X } from 'lucide-react';
+import { Download, Eye, EyeOff, Library, Loader2, Lock, Sparkles, Upload, X } from 'lucide-react';
 import { AiProgress } from '../components/AiProgress';
-import { AiCreate } from './AiCreate';
-import { EventStudio } from './EventStudio';
-import { BrandingStudio } from './BrandingStudio';
 import { http, ApiClientError } from '../lib/api';
 import { useEditor } from './editorStore';
 import { captureViewport } from './capture';
@@ -39,7 +36,7 @@ interface Job {
  * a toggle over the viewport rather than replacing it, because the point is to
  * compare the render against the layout it came from.
  */
-export function AiPanel() {
+export function AiPanel({ onOpenAi }: { onOpenAi?: () => void } = {}) {
   const planId = useEditor((s) => s.planId);
   const readOnly = useEditor((s) => s.readOnly);
 
@@ -50,8 +47,6 @@ export function AiPanel() {
   const [render, setRender] = useState<string | null>(null);
   const [showRender, setShowRender] = useState(true);
   const [picking, setPicking] = useState(false);
-  const [studioOpen, setStudioOpen] = useState(false);
-  const [brandingOpen, setBrandingOpen] = useState(false);
   const [sourceImage, setSourceImage] = useState<string | null>(null);
 
   const { data: capabilities } = useQuery({
@@ -173,58 +168,31 @@ export function AiPanel() {
   const enhanceCap = capabilities?.ai_enhance;
   const to3dCap = capabilities?.ai_image_to_3d;
   const running = job && (job.status === 'queued' || job.status === 'in_progress');
-  const [createOpen, setCreateOpen] = useState(false);
 
   return (
     <>
       {/*
-        Two AI doors, side by side, because they are different jobs.
+        One way in to the AI, not four.
 
-        "Create" makes an object that does not exist yet and puts it in the
-        room. "Enhance" photographs the room as it stands. Putting them
-        together makes the choice obvious; the generator used to be on a
-        separate page, which is most of why nobody found it.
+        Create, Studio and Branding each opened their own floating panel from
+        here, and all three are now tabs of the AI section in the rail. Keeping
+        the header buttons would have meant two routes to the same surfaces,
+        which is how someone ends up with a Studio panel over an AI panel
+        showing the same card. This opens the section instead.
+
+        AI Enhance keeps its place beside it: it renders the current view rather
+        than building or branding a plan, and it is where people look for it.
       */}
       <button
         type="button"
         className="ed-action"
-        disabled={readOnly}
-        title="Describe an object and place it in the plan"
-        onClick={() => setCreateOpen(true)}
+        title="Describe an event and have it built, make branding, or ask for changes"
+        onClick={() => {
+          useEditor.getState().setWorkPanel('ai');
+          onOpenAi?.();
+        }}
       >
-        <Wand2 className="h-3.5 w-3.5" /> Create
-      </button>
-
-      {/*
-        The whole-event path, next to the single-object one.
-        `Create` makes one thing; `Studio` takes a sentence and builds the room
-        it describes. They sit together because they answer the same question at
-        different scales, and a planner reaching for one often wants the other.
-      */}
-      <button
-        type="button"
-        className="ed-action"
-        disabled={readOnly}
-        title="Describe a whole event and build it in the room"
-        onClick={() => setStudioOpen(true)}
-      >
-        <LayoutDashboard className="h-3.5 w-3.5" /> Studio
-      </button>
-
-      {/*
-        Branding, beside the two generators.
-        An event is not finished when the furniture is in — the client sees the
-        logo first — and this is where the artwork is made and put on the
-        surfaces the layout already placed.
-      */}
-      <button
-        type="button"
-        className="ed-action"
-        disabled={readOnly}
-        title="Make logos, screen content and banners, and put them on the event"
-        onClick={() => setBrandingOpen(true)}
-      >
-        <Palette className="h-3.5 w-3.5" /> Branding
+        <Sparkles className="h-3.5 w-3.5" /> AI
       </button>
 
       <button type="button" className="ed-action-primary" disabled={readOnly}
@@ -232,9 +200,6 @@ export function AiPanel() {
         <Sparkles className="h-3.5 w-3.5" /> AI Enhance
       </button>
 
-      {createOpen ? <AiCreate onClose={() => setCreateOpen(false)} /> : null}
-      {studioOpen ? <EventStudio onClose={() => setStudioOpen(false)} /> : null}
-      {brandingOpen ? <BrandingStudio onClose={() => setBrandingOpen(false)} /> : null}
 
       {/* Render overlay, toggled against the live viewport. */}
       {render ? (

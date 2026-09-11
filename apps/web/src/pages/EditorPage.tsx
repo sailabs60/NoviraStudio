@@ -655,7 +655,11 @@ function StudioTopBar({
         <span className="mx-1 h-5 w-px bg-line" aria-hidden />
 
         <EditorPresence />
-        <AiPanel />
+        {/*
+          Opening the AI section from the header has to open the panel too: the
+          rail selection is meaningless while the sidebar beside it is shut.
+        */}
+        <AiPanel onOpenAi={() => { if (!leftOpen) onToggleLeft(); }} />
 
         {/* Below xl the centre group has nowhere to sit, so it folds in here. */}
         <span className="flex items-center gap-0.5 xl:hidden">
