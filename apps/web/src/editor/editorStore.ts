@@ -46,12 +46,29 @@ export type WorkPanel =
   | 'add'
   | 'build'
   | 'finish'
+  /**
+   * The AI section.
+   *
+   * A first-class part of the work rather than a button in the header. Making
+   * a room, branding it and asking for changes are three parts of one job, and
+   * scattering them across a header button, a floating assistant and a tab
+   * inside it meant nobody found the second and third.
+   */
+  | 'ai'
   | 'site'
   | 'light'
   | 'cost'
   | 'check'
   | 'present'
   | 'review'
+  /**
+   * Everything that is not part of designing the room.
+   *
+   * Cost, Check and Review are all things you do *to* a finished plan rather
+   * than steps in making one, and nine flat icons in a rail is more than
+   * anyone scans. They live behind this.
+   */
+  | 'more'
   /**
    * Not a rail section any more.
    *
@@ -412,7 +429,14 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   itemCache: {},
 
-  workPanel: 'add',
+  /*
+   * The AI section is what a plan opens on.
+   *
+   * It is the first thing most people want — describe the event and have it
+   * built — and leaving the rail on the catalogue meant that path was found
+   * only by people who already knew it existed.
+   */
+  workPanel: 'ai',
   constraintKind: 'keep-clear',
   constraintDraft: [],
   constraintHover: null,

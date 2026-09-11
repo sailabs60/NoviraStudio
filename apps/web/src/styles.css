@@ -320,6 +320,76 @@ body {
   .ed-action-primary {
     @apply ed-action bg-primary text-primary-fg shadow-btn hover:bg-primary-strong hover:text-primary-fg;
   }
+  /* ── The AI section ──────────────────────────────────────────────────
+     A deliberately softer, roomier language than the rest of the editor.
+     Everywhere else is a dense tool panel where a designer is placing
+     millimetres; this is where they are thinking in sentences, and the
+     controls a person types prose into want the room to breathe — larger
+     targets, more padding, rounder corners. The colours are the product's
+     own, so it reads as the same application in a calmer mood rather than
+     as a different one bolted on. */
+
+  /* A card. The unit the whole section is built from. */
+  .ai-card {
+    @apply rounded-xl border border-line bg-surface p-4 shadow-sm;
+  }
+  .ai-card-title {
+    @apply text-[15px] font-bold leading-tight text-ink;
+  }
+  .ai-card-note {
+    @apply mt-1 text-[12px] leading-relaxed text-ink-muted;
+  }
+
+  /* The prompt box: tinted, generous, and obviously the thing to type in. */
+  .ai-prompt {
+    @apply w-full resize-none rounded-xl border border-primary/25 bg-primary/[0.04] px-3.5 py-3
+           text-[13px] leading-relaxed text-ink placeholder:text-ink-subtle
+           transition duration-150 focus:border-primary focus:bg-surface focus:outline-none
+           focus:ring-4 focus:ring-primary/10;
+  }
+  .ai-input {
+    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[13px] text-ink
+           placeholder:text-ink-subtle transition duration-150
+           focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10;
+  }
+
+  /* Buttons, sized for a section people read rather than scan. */
+  .ai-btn {
+    @apply inline-flex select-none items-center justify-center gap-1.5 rounded-lg px-3.5 py-2
+           text-[12px] font-semibold text-ink-muted transition duration-150
+           hover:bg-surface-muted hover:text-ink focus-visible:outline-none
+           focus-visible:ring-2 focus-visible:ring-primary/70
+           disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .ai-btn-primary {
+    @apply ai-btn bg-primary text-primary-fg shadow-btn hover:bg-primary-strong hover:text-primary-fg;
+  }
+
+  /* Filter pills, as on the artwork gallery. */
+  .ai-pill {
+    @apply inline-flex select-none items-center rounded-full px-3 py-1 text-[11px] font-semibold
+           text-ink-muted transition duration-150 hover:bg-surface-muted hover:text-ink;
+  }
+  .ai-pill-active {
+    @apply bg-primary text-primary-fg hover:bg-primary hover:text-primary-fg;
+  }
+
+  /* The two speakers in a conversation. */
+  .ai-bubble-user {
+    @apply ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-primary px-3.5 py-2
+           text-[12px] leading-relaxed text-primary-fg;
+  }
+  .ai-bubble-assistant {
+    @apply mr-auto max-w-[92%] rounded-2xl rounded-bl-md border border-line bg-surface-muted
+           px-3.5 py-2.5 text-[12px] leading-relaxed text-ink;
+  }
+
+  /* The note the section closes with — what you can do next. */
+  .ai-hint {
+    @apply rounded-lg border border-primary/20 bg-primary/[0.06] px-3 py-2.5
+           text-[11px] leading-relaxed text-primary;
+  }
+
   .ed-segment {
     @apply inline-flex rounded-lg border border-line bg-surface-muted p-0.5;
   }

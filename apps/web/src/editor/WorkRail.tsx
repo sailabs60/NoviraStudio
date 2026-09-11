@@ -5,6 +5,8 @@ import {
   Calculator,
   Hammer,
   Lightbulb,
+  MoreHorizontal,
+  Sparkles,
   MapPin,
   MessageSquare,
   Presentation,
@@ -79,11 +81,19 @@ export const RAIL_ITEMS: RailItem[] = [
     phase: 'create',
   },
   {
+    key: 'ai',
+    label: 'AI',
+    icon: <Sparkles className="h-[18px] w-[18px]" />,
+    help: 'Describe an event and have it built, make branding and artwork, or ask for changes to what is already here.',
+    shortcut: '4',
+    phase: 'create',
+  },
+  {
     key: 'site',
     label: 'Site',
     icon: <MapPin className="h-[18px] w-[18px]" />,
     help: 'The building: height limit, rigging points, power, exits and truck access. Pick a venue and it all arrives at once.',
-    shortcut: '4',
+    shortcut: '5',
     phase: 'refine',
   },
   {
@@ -91,7 +101,7 @@ export const RAIL_ITEMS: RailItem[] = [
     label: 'Light',
     icon: <Lightbulb className="h-[18px] w-[18px]" />,
     help: 'Choose a look and light the whole room in one press, then adjust any fixture.',
-    shortcut: '5',
+    shortcut: '6',
     phase: 'refine',
   },
   {
@@ -99,15 +109,35 @@ export const RAIL_ITEMS: RailItem[] = [
     label: 'Present',
     icon: <Presentation className="h-[18px] w-[18px]" />,
     help: 'Renders, walkthrough videos, technical drawings, CAD and the client deck.',
-    shortcut: '6',
+    shortcut: '7',
     phase: 'deliver',
   },
+  {
+    key: 'more',
+    label: 'More',
+    icon: <MoreHorizontal className="h-[18px] w-[18px]" />,
+    help: 'Cost, checks and review — everything you do to a finished plan rather than to build one.',
+    shortcut: '8',
+    phase: 'deliver',
+  },
+];
+
+/**
+ * What lives behind More.
+ *
+ * Cost, Check and Review are not steps in designing a room; they are things
+ * you do to a room once it exists. Keeping them in the rail alongside Create
+ * and Build gave them equal billing with the work itself, and made nine flat
+ * icons where a person scans about six. They keep their own panels, their own
+ * shortcuts and their own place in the store — only the way in has moved.
+ */
+export const MORE_ITEMS: RailItem[] = [
   {
     key: 'cost',
     label: 'Cost',
     icon: <Calculator className="h-[18px] w-[18px]" />,
     help: 'Quantities measured from the drawing — LED, truss, carpet, print, labour — and what they cost at your rates.',
-    shortcut: '7',
+    shortcut: '',
     phase: 'deliver',
   },
   {
@@ -115,7 +145,7 @@ export const RAIL_ITEMS: RailItem[] = [
     label: 'Check',
     icon: <ShieldCheck className="h-[18px] w-[18px]" />,
     help: 'Fire safety, sightlines, screen placement, spacing and access, checked against the rules for your market.',
-    shortcut: '8',
+    shortcut: '',
     phase: 'deliver',
   },
   {
@@ -123,7 +153,7 @@ export const RAIL_ITEMS: RailItem[] = [
     label: 'Review',
     icon: <MessageSquare className="h-[18px] w-[18px]" />,
     help: 'Comments pinned in the 3D scene, saved versions, and a comparison of any two layouts.',
-    shortcut: '9',
+    shortcut: '',
     phase: 'deliver',
   },
 ];

@@ -41,6 +41,8 @@ import { CostPanel } from '../editor/panels/CostPanel';
 import { CheckPanel, CheckBadge } from '../editor/panels/CheckPanel';
 import { PresentPanel } from '../editor/panels/PresentPanel';
 import { ReviewPanel } from '../editor/panels/ReviewPanel';
+import { AiPanelSection } from '../editor/panels/AiPanelSection';
+import { MorePanel } from '../editor/panels/MorePanel';
 import { AssetStrip } from '../editor/AssetStrip';
 import { BottomToolbar } from '../editor/BottomToolbar';
 import { EnvironmentDialog } from '../editor/EnvironmentDialog';
@@ -100,7 +102,15 @@ export function EditorPage() {
    * slice of viewport. Each is one click or one shortcut away, and the widths
    * they were dragged to are remembered, so nothing is lost by starting shut.
    */
-  const [leftOpen, setLeftOpen] = useState(false);
+  /*
+   * Open on the AI section.
+   *
+   * The sidebars were closed by default so a plan opened on the room rather
+   * than on chrome, which is still right for the other sections. The AI one is
+   * the exception: it is the way in for most work, and a rail icon nobody
+   * presses is a feature nobody has.
+   */
+  const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(false);
   /*
    * The templates drawer starts closed. It used to be a permanent band across
@@ -476,6 +486,12 @@ function PanelBody({ panel }: { panel: WorkPanel }) {
       return <Scrollable><BuildPanel /></Scrollable>;
     case 'finish':
       return <MaterialLibrary />;
+    /*
+     * The AI section scrolls itself: it has a header and tabs that stay put
+     * while the content under them moves.
+     */
+    case 'ai':
+      return <AiPanelSection />;
     case 'site':
       return <Scrollable><SitePanel /></Scrollable>;
     case 'light':
@@ -488,6 +504,10 @@ function PanelBody({ panel }: { panel: WorkPanel }) {
       return <Scrollable><PresentPanel /></Scrollable>;
     case 'review':
       return <Scrollable><ReviewPanel /></Scrollable>;
+    // More manages its own scrolling, because it swaps between a menu and a
+    // full panel without the outer scroll position following along.
+    case 'more':
+      return <MorePanel />;
     default:
       return <CreatePanel />;
   }
