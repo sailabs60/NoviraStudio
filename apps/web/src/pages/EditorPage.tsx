@@ -469,7 +469,15 @@ function WorkPanelHost({ onClose }: { onClose: () => void }) {
         aria-label="Work panel"
       >
         <PanelHeader panel={workPanel} onClose={onClose} />
-        <div className="min-h-0 flex-1 overflow-hidden">
+        {/*
+          A flex column, not just a sized box.
+
+          Panels that pin something to their bottom edge — the AI section's
+          chat composer — need a parent that actually distributes height. As a
+          plain block this was `flex-1` of nothing, so the composer floated
+          wherever the messages above it happened to end.
+        */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <PanelBody panel={workPanel} />
         </div>
       </aside>

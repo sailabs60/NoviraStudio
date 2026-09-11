@@ -79,13 +79,25 @@ export function AiPanelSection() {
         </div>
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3.5 pb-4">
-        {tab === 'concept' ? <AiConceptTab /> : null}
-        {tab === 'model' ? <AiModelTab /> : null}
-        {tab === 'artwork' ? <AiArtworkTab /> : null}
-        {tab === 'assistant' ? <AiAssistantTab /> : null}
-        {tab === 'documents' ? <AiDocumentsTab /> : null}
-      </div>
+      {/*
+        The conversation manages its own scrolling, because its composer is
+        pinned to the bottom of the panel while the messages move behind it —
+        a chat whose input floats in the middle of the empty space below the
+        last message reads as unfinished. The other tabs are ordinary stacked
+        content and scroll as one.
+      */}
+      {tab === 'assistant' ? (
+        <div className="flex min-h-0 flex-1 flex-col px-3.5 pb-3.5">
+          <AiAssistantTab />
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto px-3.5 pb-4">
+          {tab === 'concept' ? <AiConceptTab /> : null}
+          {tab === 'model' ? <AiModelTab /> : null}
+          {tab === 'artwork' ? <AiArtworkTab /> : null}
+          {tab === 'documents' ? <AiDocumentsTab /> : null}
+        </div>
+      )}
     </div>
   );
 }
