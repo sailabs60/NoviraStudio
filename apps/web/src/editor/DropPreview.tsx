@@ -6,6 +6,7 @@ import { mmToWorld } from '@novira/shared';
 import type { CatalogItemDto } from '@novira/shared';
 import { useDrag } from './dragStore';
 import { useEditor } from './editorStore';
+import { proxied } from '../lib/assetsApi';
 
 /**
  * The ghost that stands on the floor where a dragged model would land.
@@ -191,7 +192,16 @@ function GhostBox({ size }: { size: { width: number; depth: number; height: numb
  * furniture already there.
  */
 function GhostModel({ url }: { url: string }) {
-  const { scene } = useGLTF(url, '/draco/');
+  /*
+   * Through our own origin, always.
+   *
+   * A provider's glTF is fetched by three.js with `fetch`, so one that sends no
+   * CORS header fails — and it fails inside the loader's async callback where
+   * no error boundary can reach it, which on the deployed site took the WebGL
+   * context down and blanked the editor. `proxied` is a no-op for URLs already
+   * on our origin, so this costs nothing for the catalogue's own models.
+   */
+  const { scene } = useGLTF(proxied(url) ?? url, '/draco/');
 
   const ghost = useMemo(() => {
     const copy = scene.clone(true);

@@ -185,6 +185,30 @@ const PROXY_HOSTS = [
   'wikimedia.org',
   'pinimg.com',
   'pinterest.com',
+
+  /*
+   * The AI providers' own asset delivery.
+   *
+   * Everything Novira generates comes back as a signed URL on one of these,
+   * and none of them send CORS headers — so a generated model fetched directly
+   * by three.js fails, and it fails inside the loader's async callback where no
+   * error boundary can catch it. On the deployed site that took the WebGL
+   * context down: one generated asset in a plan blanked the whole editor.
+   *
+   * These belong on the list for the same reason every other entry does — they
+   * are hosts this product's own features fetch from as a matter of course.
+   * Listing them is what makes a generated asset usable in a scene at all.
+   */
+  'tripo3d.com',
+  'data.tripo3d.com',
+  'tripo-data.rg1.data.tripo3d.com',
+  'openai.com',
+  'oaiusercontent.com',
+  'blob.core.windows.net',
+  'cloudinary.com',
+  'res.cloudinary.com',
+  'fal.media',
+  'replicate.delivery',
 ];
 
 function hostAllowed(url: URL): boolean {

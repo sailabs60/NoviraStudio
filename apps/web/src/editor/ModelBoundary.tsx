@@ -1,4 +1,5 @@
 import { Component, useEffect, useState, type ReactNode } from 'react';
+import { proxied } from '../lib/assetsApi';
 
 /**
  * Error boundary around a single placed model.
@@ -76,7 +77,17 @@ const reachability = new Map<string, Promise<boolean>>();
 export function checkReachable(url: string): Promise<boolean> {
   let pending = reachability.get(url);
   if (!pending) {
-    pending = fetch(url, { method: 'HEAD' })
+    /*
+     * Ask the URL the loader will actually use.
+     *
+     * A cross-origin HEAD is refused by the same policy that refuses the GET,
+     * so probing a provider's raw URL reports "broken" for assets that are
+     * perfectly good — and the placeholder box that produces looks exactly like
+     * a genuinely missing model. The proxy is on our own origin, so the probe
+     * and the load agree.
+     */
+    const target = proxied(url) ?? url;
+    pending = fetch(target, { method: 'HEAD' })
       .then((r) => r.ok)
       .catch(() => false);
     reachability.set(url, pending);

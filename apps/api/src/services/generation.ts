@@ -325,12 +325,47 @@ async function startTripo(body: Record<string, unknown>): Promise<string> {
  * Called once, when a job succeeds. Everything a plan can reference has to
  * survive the provider's link expiring, so nothing provider-hosted is ever
  * written into a scene document.
+ *
+ * ## Why the model's mirror failure is fatal and the thumbnail's is not
+ *
+ * That paragraph above was the contract, and the code did not keep it: both
+ * mirrors fell back to the provider's own URL on any failure. Tripo returns a
+ * signed CloudFront link with an expiry and no CORS headers, so the fallback
+ * wrote a URL into the plan that a browser cannot fetch at all — and three.js
+ * reports a glTF failure from inside an async callback that no React error
+ * boundary can intercept, so it surfaced as a lost WebGL context. One asset
+ * generated on a bad network blanked the whole editor, permanently, for that
+ * plan.
+ *
+ * A silent fallback to a URL that is *known* to be unusable is worse than a
+ * failure, because the failure is deferred to somebody else's session and
+ * arrives with no explanation. So the model now throws: the job fails, the
+ * credits are refunded by the surrounding machinery, and the user is told the
+ * generation could not be saved — which is true, actionable, and recoverable by
+ * pressing the button again.
+ *
+ * The **thumbnail** keeps its fallback deliberately. It is displayed in an
+ * `<img>` rather than read by WebGL, so a cross-origin one works; and a
+ * generation that succeeded should not be thrown away because its preview
+ * picture could not be copied. A missing thumbnail costs a grey tile.
  */
 export async function adopt(
   result: TaskStatus,
   subdir: string
 ): Promise<{ url: string | null; thumbnailUrl: string | null }> {
-  const url = result.resultUrl ? await mirror(result.resultUrl, subdir).catch(() => result.resultUrl!) : null;
+  let url: string | null = null;
+  if (result.resultUrl) {
+    try {
+      url = await mirror(result.resultUrl, subdir);
+    } catch {
+      throw new ApiError(
+        502,
+        'MIRROR_FAILED',
+        'The result was generated but could not be saved to Novira’s storage. Nothing was charged — please try again.'
+      );
+    }
+  }
+
   const thumbnailUrl = result.thumbnailUrl
     ? await mirror(result.thumbnailUrl, `${subdir}/thumbs`).catch(() => result.thumbnailUrl!)
     : null;

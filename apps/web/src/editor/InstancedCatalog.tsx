@@ -35,6 +35,7 @@ import * as THREE from 'three';
 import { SimplifyModifier } from 'three/examples/jsm/modifiers/SimplifyModifier.js';
 import { mmToWorld, type CatalogSceneObject, type SceneObject } from '@novira/shared';
 import { useEditor } from './editorStore';
+import { proxied } from '../lib/assetsApi';
 
 /** Below this a batch is not worth forming; the per-object path is fine. */
 const MIN_BATCH = 8;
@@ -174,7 +175,16 @@ interface Part {
 }
 
 function ModelBatch({ url, objects }: { url: string; objects: CatalogSceneObject[] }) {
-  const { scene } = useGLTF(url, '/draco/');
+  /*
+   * Through our own origin, always.
+   *
+   * A provider's glTF is fetched by three.js with `fetch`, so one that sends no
+   * CORS header fails — and it fails inside the loader's async callback where
+   * no error boundary can reach it, which on the deployed site took the WebGL
+   * context down and blanked the editor. `proxied` is a no-op for URLs already
+   * on our origin, so this costs nothing for the catalogue's own models.
+   */
+  const { scene } = useGLTF(proxied(url) ?? url, '/draco/');
   const count = objects.length;
   const toggleSelect = useEditor((s) => s.toggleSelect);
   const readOnly = useEditor((s) => s.readOnly);

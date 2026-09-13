@@ -72,6 +72,7 @@ import { WalkthroughCamera } from './WalkthroughCamera';
 import { isSoftwareRenderer, useRendererProfile } from './rendererProfile';
 import { applyFinishes, clearFinishes } from './finishRenderer';
 import { registerPicking, surfaceHeightAt } from './picking';
+import { proxied } from '../lib/assetsApi';
 import { locateRoom } from './measureVenue';
 import { StudioStage3D, ToneMapping } from './StudioStage3D';
 import { DropPreview } from './DropPreview';
@@ -160,7 +161,16 @@ function LoadedModel({
    * the critical path for the catalogue — a blocked or unreachable CDN would
    * mean those models silently fail to render.
    */
-  const { scene } = useGLTF(url, DRACO_DECODER_PATH);
+  /*
+   * Through our own origin, always.
+   *
+   * A provider's glTF is fetched by three.js with `fetch`, so one that sends no
+   * CORS header fails — and it fails inside the loader's async callback where
+   * no error boundary can reach it, which on the deployed site took the WebGL
+   * context down and blanked the editor. `proxied` is a no-op for URLs already
+   * on our origin, so this costs nothing for the catalogue's own models.
+   */
+  const { scene } = useGLTF(proxied(url) ?? url, DRACO_DECODER_PATH);
 
   /*
    * Each placement needs its own copy of the graph — the same catalogue model

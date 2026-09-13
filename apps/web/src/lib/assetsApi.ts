@@ -173,5 +173,55 @@ export const assets = {
 export function proxied(url: string | null | undefined): string | undefined {
   if (!url) return undefined;
   if (url.startsWith('/') || url.startsWith('data:') || url.startsWith('blob:')) return url;
+  // Already ours: proxying our own origin would be a pointless extra hop, and
+  // double-wrapping a proxy URL produces a request for a request.
+  if (url.includes('/api/assets/proxy')) return url;
   return `/api/assets/proxy?url=${encodeURIComponent(url)}`;
+}
+
+/**
+ * The same, for anything WebGL will fetch — models above all.
+ *
+ * ## Why a model needs this even more than a texture does
+ *
+ * A cross-origin image that a canvas merely *displays* is fine; one it reads
+ * pixels from is not. A **model** is always the second case: three.js fetches
+ * the glTF with `fetch`, so a provider that sends no `Access-Control-Allow-Origin`
+ * header fails outright — and it fails *inside the loader's own async callback*,
+ * where no React error boundary can reach it. On the deployed site that took
+ * the WebGL context down with it, so one generated asset with an expiring
+ * signed URL blanked the entire editor.
+ *
+ * Generated assets are exactly where this bites. Tripo hands back a signed
+ * CloudFront URL with no CORS headers and a deadline on it, and that URL was
+ * being written straight into the scene document — so the plan was one
+ * unopenable link away from a white screen, forever.
+ *
+ * ## Why it is applied at the loader rather than at the call sites
+ *
+ * Because the bad URLs are already saved. Plans written before this fix carry
+ * raw provider URLs in their documents, and fixing only the places that *create*
+ * placements would leave every one of those still crashing. Routing at the
+ * point of loading covers the ones already in the database as well as the ones
+ * made from here on.
+ */
+export function proxiedModel(url: string | null | undefined): string | undefined {
+  return proxied(url);
+}
+
+/**
+ * Is this URL one a browser will fetch cross-origin without complaint?
+ *
+ * Our own origin and inline data are always safe. Everything else has to go
+ * through the proxy before it is handed to a loader or a reachability check —
+ * a cross-origin HEAD is refused by the same policy that refuses the GET, so
+ * checking the raw URL answers "broken" for assets that are perfectly fine.
+ */
+export function isSameOrigin(url: string): boolean {
+  if (url.startsWith('/') || url.startsWith('data:') || url.startsWith('blob:')) return true;
+  try {
+    return new URL(url, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
 }
