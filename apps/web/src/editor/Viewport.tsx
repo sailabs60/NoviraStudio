@@ -44,6 +44,7 @@ import {
   expandBounds,
   withinBounds,
   type SiteBoundsMm,
+  DEFAULT_FLOOR_FINISH,
 } from '@novira/shared';
 import { useEditor } from './editorStore';
 import { ModelBoundary, useModelReachable } from './ModelBoundary';
@@ -593,9 +594,38 @@ function FinishedFloor() {
   const finish = useEditor((s) => s.scene.floorFinish);
   const walls = useEditor((s) => s.scene.walls.segments);
   const objects = useEditor((s) => s.scene.objects);
+  const site = useEditor((s) => s.venueSite);
   const ref = useRef<THREE.Mesh>(null);
 
-  const size = useMemo(() => {
+  /*
+   * The carpet goes in the room, on the floor of the room.
+   *
+   * Both halves were wrong once a building was involved. The slab was laid at
+   * y = 0, which in a venue whose ground floor sits above the model origin is
+   * *under the building* — so the finish a designer chose was invisible, and
+   * the floor they were looking at was whatever the imported model happened to
+   * be textured with. And it was sized by measuring every object in the plan
+   * including the shell itself, which on a 54 m hotel produced a 120 m slab
+   * paving the world well past any wall.
+   *
+   * Given a room, both answers are simply known: it covers the room, at the
+   * height of the storey being worked on.
+   */
+  const placement = useMemo(() => {
+    if (site) {
+      const floor = activeSiteFloor(site);
+      const bounds = floor.boundsMm;
+      const centre = boundsCentreMm(bounds);
+      return {
+        width: mmToWorld(boundsWidthMm(bounds)),
+        depth: mmToWorld(boundsDepthMm(bounds)),
+        x: mmToWorld(centre.xMm),
+        z: mmToWorld(centre.zMm),
+        // A hair above the storey's own slab, so it reads as laid on it.
+        y: mmToWorld(floor.elevationMm) + 0.006,
+      };
+    }
+
     let maxMm = 0;
     for (const segment of walls) {
       const a = segment?.start;
@@ -614,8 +644,8 @@ function FinishedFloor() {
     // A 10 m floor is the floor of a small room; 120 m is a large hall and
     // also the extent of the grid, so there is no point going past it.
     const metres = Math.min(120, Math.max(10, (maxMm / 1000) * 2 + 4));
-    return metres;
-  }, [walls, objects]);
+    return { width: metres, depth: metres, x: 0, z: 0, y: 0.0005 };
+  }, [walls, objects, site]);
 
   useEffect(() => {
     const mesh = ref.current;
@@ -637,9 +667,28 @@ function FinishedFloor() {
 
   if (!finish) return null;
 
+  /*
+   * A venue's own floor is left showing unless somebody has chosen otherwise.
+   *
+   * Every plan starts with grey event carpet, which is the right default on
+   * open ground and quite wrong inside an imported ballroom: the model already
+   * has a floor, it was modelled by somebody who looked at the real one, and
+   * covering it with the product's default grey the instant a venue is applied
+   * throws that away without being asked. A finish the designer actually
+   * picked is a decision and is honoured — carpeting a hall is a real thing to
+   * do — but the default is not a decision.
+   */
+  if (site && finish.materialId === DEFAULT_FLOOR_FINISH.materialId) return null;
+
   return (
-    <mesh ref={ref} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.0005, 0]} receiveShadow raycast={() => null}>
-      <planeGeometry args={[size, size]} />
+    <mesh
+      ref={ref}
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[placement.x, placement.y, placement.z]}
+      receiveShadow
+      raycast={() => null}
+    >
+      <planeGeometry args={[placement.width, placement.depth]} />
       <meshStandardMaterial color={finish.colorHex} roughness={finish.roughness} metalness={finish.metalness} />
     </mesh>
   );
