@@ -66,7 +66,22 @@ export function useDropTarget(): DropTargetHandlers {
       return;
     }
 
-    if (payload.kind === 'material') {
+    /*
+     * An image dragged over an object goes *on* it.
+     *
+     * Dropping a graphic always produced a free-standing printed panel, wherever
+     * it was released — which is right over empty floor and wrong over a bar
+     * front, a stand fascia, a stage riser or a screen. Those are the surfaces a
+     * designer is actually trying to brand, and the only way to do it was to
+     * place a panel and then wrestle it into position against the thing it was
+     * meant to be printed on.
+     *
+     * Over geometry the drop now applies the image to that surface as a decal;
+     * over the floor it behaves exactly as it always has. The intent is
+     * published as the cursor moves, so which of the two is about to happen is
+     * visible before the mouse is released rather than discovered after.
+     */
+    if (payload.kind === 'material' || payload.kind === 'image') {
       const hit = pickSurface(event.clientX, event.clientY);
       if (hit) {
         const object = editor.scene.objects.find((o) => o.id === hit.objectId);
@@ -76,6 +91,23 @@ export function useDropTarget(): DropTargetHandlers {
           objectName: object?.name || 'this object',
           part: hit.part,
           partLabel: hit.partLabel,
+        });
+        return;
+      }
+      // An image over open floor is still a panel; only a material paints it.
+      if (payload.kind === 'image') {
+        const spot = pickPlacement(event.clientX, event.clientY);
+        if (!spot) {
+          writeIntent({ type: 'none' });
+          return;
+        }
+        writeIntent({
+          type: 'place',
+          xMm: spot.xMm,
+          yMm: spot.yMm,
+          zMm: spot.zMm,
+          snapped: false,
+          onSurface: spot.onSurface,
         });
         return;
       }
@@ -219,6 +251,37 @@ async function performDrop(
 }
 
 /**
+ * An image, as a surface finish.
+ *
+ * The whole difference between a decal and a material is the tiling. A material
+ * repeats — oak at 600 mm, carpet at 800 — because that is how the real thing
+ * covers an area. A graphic must **not** repeat: a logo tiled nine times across
+ * a bar front is not branding, it is wallpaper, and it is the single most
+ * obvious way to get this wrong.
+ *
+ * So the tile is set enormous, which in practice means one copy stretched over
+ * the surface, and the finish is left otherwise plain — a mid roughness and no
+ * metalness, which is what printed vinyl, foamex and fabric all look like. The
+ * base colour is white so the image comes through untinted; the tint exists for
+ * materials that carry a greyscale map.
+ */
+function decalFinish(asset: ProviderAsset, url: string): SurfaceFinish {
+  return {
+    materialId: `decal:${asset.source}:${asset.sourceAssetId}`,
+    label: asset.name.slice(0, 60),
+    source: asset.sourceLabel ?? 'Image',
+    license: asset.license ?? undefined,
+    maps: { color: proxied(url) ?? url },
+    // Effectively "do not repeat" — one copy across any surface in this product.
+    tileMm: 1_000_000,
+    colorHex: '#ffffff',
+    roughness: 0.62,
+    metalness: 0,
+    previewUrl: asset.thumbnailUrl ?? url,
+  };
+}
+
+/**
  * Where a drop lands, snapped if snapping is on.
  *
  * The Y matters as much as the X and Z. A venue model whose ground floor sits
@@ -285,14 +348,42 @@ function dropHdri(asset: ProviderAsset): void {
 }
 
 function dropImage(asset: ProviderAsset, clientX: number, clientY: number): void {
-  const point = dropPoint(clientX, clientY);
-  if (!point) {
-    toast('info', 'Drop an image onto the floor of the plan.');
-    return;
-  }
   const url = asset.imageUrl ?? asset.thumbnailUrl;
   if (!url) {
     toast('error', 'That image could not be read.');
+    return;
+  }
+
+  /*
+   * On the surface it was dropped on, when there is one.
+   *
+   * A logo belongs on the bar front, the stand fascia, the stage riser or the
+   * screen — and until now dropping one anywhere produced a panel standing on
+   * the floor, which the designer then had to drag into place against the thing
+   * it was supposed to be printed on.
+   *
+   * It goes on as a finish rather than as a separate object because that is
+   * what a printed graphic *is*: the surface's appearance changed. It then
+   * inherits everything finishes already do — it survives a reload, it is
+   * listed and removable per part in the properties panel, and it follows the
+   * object when it is moved, none of which a floating panel does.
+   */
+  const hit = pickSurface(clientX, clientY);
+  if (hit) {
+    const editor = useEditor.getState();
+    const object = editor.scene.objects.find((o) => o.id === hit.objectId);
+    editor.applyFinish(hit.objectId, hit.part, decalFinish(asset, url));
+    toast(
+      'success',
+      `${asset.name} printed on the ${hit.partLabel} of ${object?.name ?? 'that object'}.`,
+      { label: 'Undo', onClick: () => useEditor.getState().undo() }
+    );
+    return;
+  }
+
+  const point = dropPoint(clientX, clientY);
+  if (!point) {
+    toast('info', 'Drop an image onto the floor, or onto an object to print it on.');
     return;
   }
 
@@ -329,7 +420,7 @@ function dropImage(asset: ProviderAsset, clientX: number, clientY: number): void
   };
 
   useEditor.getState().addObjects([artwork]);
-  toast('success', `${asset.name} added as a printed panel.`);
+  toast('success', `${asset.name} added as a printed panel. Drop it on an object to print it on instead.`);
 }
 
 function dropCatalogItem(item: CatalogItemDto, clientX: number, clientY: number): void {

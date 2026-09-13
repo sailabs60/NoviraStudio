@@ -30,7 +30,6 @@ const STARTERS = [
 export function AiAssistantTab() {
   const agent = useSceneAgent();
   const objectCount = useEditor((s) => s.scene.objects.length);
-  const takeAiSeed = useEditor((s) => s.takeAiSeed);
   const scroller = useRef<HTMLDivElement>(null);
 
   // Follow the conversation down as it grows.
@@ -38,21 +37,6 @@ export function AiAssistantTab() {
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [agent.messages.length, agent.thinking]);
-
-  /*
-   * A question handed over from elsewhere — the command palette, a panel, the
-   * button on the plan — is asked as though the user had typed it, so the
-   * answer is already arriving when the tab appears rather than waiting for a
-   * second action. Consumed once, so switching back to this tab later does not
-   * re-ask it.
-   */
-  useEffect(() => {
-    const seed = takeAiSeed();
-    if (seed) void agent.send(seed);
-    // Deliberately on mount only: a seed set while this tab is already open is
-    // taken by the effect below instead.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

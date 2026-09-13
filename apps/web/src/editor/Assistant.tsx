@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUp,
   Camera,
@@ -51,6 +51,31 @@ const ASK_OPENERS = [
   'Generate a reception counter in pale oak',
 ];
 
+/**
+ * What each tab is, in the panel's own words.
+ *
+ * The distinction between these three is the most important thing the panel has
+ * to communicate and the thing its labels communicate least: **Ask** is a
+ * language model that can see and change the plan, **Layout** is arithmetic
+ * that is instant, free and exact, and **Brief** is the paid generator for
+ * wording the parser cannot follow. Whether a number can be trusted to the
+ * millimetre depends entirely on which of the three produced it.
+ */
+const TAB_INFO: Record<AssistantTab, { title: string; blurb: string }> = {
+  ask: {
+    title: 'Ask about this plan',
+    blurb: 'A model that can see every object in your plan and change it. Anything it does goes through undo.',
+  },
+  layout: {
+    title: 'Lay out a room',
+    blurb: 'Novira’s own engine. Instant, free, the same answer every time, and the only one that computes real dimensions.',
+  },
+  brief: {
+    title: 'Generate from a brief',
+    blurb: 'The full concept generator, with photo analysis — for wording the layout engine cannot read.',
+  },
+};
+
 const LAYOUT_OPENERS = [
   'A gala dinner for 220 with a stage and a dance floor',
   'A 6 × 3 m exhibition stand with a counter and a screen wall',
@@ -76,6 +101,57 @@ export function Assistant() {
   const scroller = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  /*
+   * Where the panel has been dragged to, as an offset from its home corner.
+   *
+   * A floating window over a plan is always covering *something*, and which
+   * something depends on the plan — so the answer is not a cleverer default
+   * position, it is letting it be moved. The offset is kept rather than an
+   * absolute position so the panel stays anchored to the bottom-right as the
+   * window resizes, which is the behaviour every floating inspector has.
+   *
+   * Not persisted: a panel that reopens somewhere unexpected next session is a
+   * worse surprise than one that reopens where it has always been.
+   */
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragFrom = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+
+  const startDrag = useCallback((event: React.PointerEvent) => {
+    // Only the header itself, and only with the primary button: the close and
+    // minimise buttons are in it and must not start a drag.
+    if (event.button !== 0) return;
+    if ((event.target as HTMLElement).closest('button')) return;
+    event.preventDefault();
+    dragFrom.current = { x: event.clientX, y: event.clientY, ox: offset.x, oy: offset.y };
+  }, [offset]);
+
+  useEffect(() => {
+    const onMove = (event: PointerEvent) => {
+      const from = dragFrom.current;
+      if (!from) return;
+      /*
+       * Clamped so the panel can never be dragged off the screen. The header
+       * is what is held onto, so keeping *it* reachable is what matters — the
+       * body may hang past the bottom edge on a short window.
+       */
+      const nextX = from.ox - (event.clientX - from.x);
+      const nextY = from.oy - (event.clientY - from.y);
+      setOffset({
+        x: Math.min(Math.max(nextX, -16), Math.max(0, window.innerWidth - 420)),
+        y: Math.min(Math.max(nextY, -16), Math.max(0, window.innerHeight - 140)),
+      });
+    };
+    const onUp = () => {
+      dragFrom.current = null;
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, []);
+
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' });
   }, [agent.messages, agent.thinking]);
@@ -97,7 +173,15 @@ export function Assistant() {
       <button
         type="button"
         onClick={() => show()}
-        className="absolute bottom-4 right-4 z-20 flex items-center gap-2 rounded-full bg-primary py-2.5 pl-3 pr-4 text-primary-fg shadow-glow transition hover:bg-primary-strong"
+        /*
+         * Clear of the corner, which belongs to the orbit compass.
+         *
+         * Both sat at `bottom-4 right-4`, so the one control that says which way
+         * the room is facing was permanently underneath a blue button. Moving
+         * the bubble left by the compass's own width costs it nothing — it is
+         * still the most prominent thing on the plan that is not the plan.
+         */
+        className="absolute bottom-4 right-[110px] z-20 flex items-center gap-2 rounded-full bg-primary py-2.5 pl-3 pr-4 text-primary-fg shadow-glow transition hover:bg-primary-strong"
         aria-label="Open the design assistant"
       >
         <Sparkles className="h-4 w-4" />
@@ -117,17 +201,33 @@ export function Assistant() {
 
   return (
     <div
-      className={`nv-rise absolute bottom-4 right-4 z-20 flex w-[380px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-modal ${
+      className={`nv-rise absolute z-20 flex w-[380px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-modal ${
         minimised ? '' : 'max-h-[min(600px,calc(100vh-9rem))]'
       }`}
+      style={{ right: 16 + offset.x, bottom: 16 + offset.y }}
       role="dialog"
-      aria-label="Design assistant"
+      aria-label={TAB_INFO[tab].title}
     >
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3">
-        <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary-soft text-primary">
+      {/*
+        The header, with the tab's own name in it.
+
+        "Design assistant" alone told you nothing about which of the three
+        things you were looking at, and the three are genuinely different tools
+        rather than modes of one — so the heading says which. Dragging it is
+        also how the panel gets out of the way of the corner of the plan it
+        happens to be covering, which is the one complaint a fixed floating
+        window always earns.
+      */}
+      <header
+        onPointerDown={startDrag}
+        className="flex h-11 shrink-0 cursor-grab items-center gap-2 border-b border-line px-3 active:cursor-grabbing"
+      >
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
           <Sparkles className="h-3.5 w-3.5" />
         </span>
-        <h2 className="min-w-0 flex-1 truncate text-[13px] font-bold text-ink">Design assistant</h2>
+        <h2 className="min-w-0 flex-1 truncate text-[13px] font-bold text-ink">
+          {TAB_INFO[tab].title}
+        </h2>
         <button
           type="button"
           className="icon-btn-bare h-7 w-7"
@@ -143,7 +243,7 @@ export function Assistant() {
 
       {!minimised ? (
         <>
-          <div className="shrink-0 border-b border-line px-2 py-1.5">
+          <div className="shrink-0 border-b border-line px-2 pb-2 pt-1.5">
             <div className="ed-segment w-full">
               <TabButton active={tab === 'ask'} onClick={() => setTab('ask')} icon={<MessageSquare className="h-3 w-3" />}>
                 Ask
@@ -155,6 +255,21 @@ export function Assistant() {
                 Brief
               </TabButton>
             </div>
+
+            {/*
+              What the open tab actually is, in one line.
+
+              Three tabs labelled Ask, Layout and Brief look like three flavours
+              of the same box, and they are not: one is a model that can see and
+              change the plan, one is arithmetic that produces real dimensions
+              for free, one is the paid generator for looser wording. Which is
+              which decides whether an answer can be trusted to the millimetre,
+              and a designer cannot be expected to infer that from a six-letter
+              label. It changes with the tab, so it is never stale.
+            */}
+            <p className="mt-1.5 px-0.5 text-[10px] leading-snug text-ink-subtle">
+              {TAB_INFO[tab].blurb}
+            </p>
           </div>
 
           {tab === 'brief' ? (
@@ -472,6 +587,19 @@ function LayoutTab() {
     }, 180);
   };
 
+  /** What the concept holds, counted by kind and named in plain words. */
+  const plannedCounts = useMemo(() => {
+    if (!result) return [];
+    const counts = new Map<string, number>();
+    for (const element of result.concept.elements) {
+      const label = element.kind.replace(/-/g, ' ');
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([kind, count]) => [count === 1 ? kind : `${kind}s`, count] as const);
+  }, [result]);
+
   const build = () => {
     if (!result || readOnly) return;
     const { concept } = result;
@@ -515,7 +643,7 @@ function LayoutTab() {
                   setInput(opener);
                   run(opener);
                 }}
-                className="w-full rounded-lg border border-line bg-surface-muted px-2.5 py-1.5 text-left text-[11px] leading-snug text-ink-muted transition hover:border-primary/40 hover:bg-primary-soft hover:text-primary"
+                className="w-full rounded-lg border border-line bg-surface px-2.5 py-2 text-left text-[11px] leading-snug text-ink-muted transition hover:border-primary/50 hover:bg-primary/[0.04] hover:text-ink"
               >
                 {opener}
               </button>
@@ -526,14 +654,35 @@ function LayoutTab() {
             <p className="rounded-2xl rounded-bl-sm border border-line bg-surface-muted px-3 py-2 text-[11px] leading-relaxed text-ink">
               {result.text}
             </p>
-            <button
-              type="button"
-              onClick={build}
-              disabled={readOnly || built}
-              className="ed-action-primary w-full justify-center disabled:opacity-50"
-            >
-              <Wand2 className="h-3.5 w-3.5" /> {built ? 'Placed in the plan' : 'Build this layout'}
-            </button>
+
+            {/*
+              What it is going to put in the room, counted by kind.
+
+              "Build this layout" is a button that rewrites somebody's plan, and
+              the sentence above it is prose — easy to read and hard to *check*.
+              A count per kind is the line that catches "it has not understood
+              this is a dinner" before the plan is rewritten rather than after,
+              which is the only moment the catch is cheap.
+            */}
+            {plannedCounts.length ? (
+              <div className="rounded-xl border border-line bg-surface p-2.5">
+                <p className="mb-1.5 text-[9px] font-bold uppercase tracking-[0.08em] text-ink-subtle">
+                  It will place
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {plannedCounts.map(([kind, count]) => (
+                    <span
+                      key={kind}
+                      className="inline-flex items-center gap-1 rounded-md border border-line bg-surface-muted px-1.5 py-0.5 text-[10px] font-semibold text-ink"
+                    >
+                      <span className="tabular-nums text-primary">{count}</span>
+                      <span className="font-medium text-ink-muted">{kind}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             {result.concept.warnings.length ? (
               <ul className="space-y-1">
                 {result.concept.warnings.slice(0, 3).map((warning) => (
@@ -542,6 +691,27 @@ function LayoutTab() {
                   </li>
                 ))}
               </ul>
+            ) : null}
+
+            {/*
+              The build button last, under everything there is to check.
+
+              It was directly under the summary and above the warnings, so the
+              reasons not to press it appeared after the press. Warnings before
+              the action is the ordering every destructive confirmation uses.
+            */}
+            <button
+              type="button"
+              onClick={build}
+              disabled={readOnly || built}
+              className="ed-action-primary w-full justify-center py-2 disabled:opacity-50"
+            >
+              <Wand2 className="h-3.5 w-3.5" /> {built ? 'Placed in the plan' : 'Build this layout'}
+            </button>
+            {built ? (
+              <p className="text-center text-[10px] text-ink-subtle">
+                Everything is editable and nothing is locked. Ctrl+Z removes the lot.
+              </p>
             ) : null}
           </>
         )}

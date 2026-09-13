@@ -57,7 +57,6 @@ export function AiModelTab() {
   const cacheItems = useEditor((s) => s.cacheItems);
   const readOnly = useEditor((s) => s.readOnly);
   const planId = useEditor((s) => s.planId);
-  const setAiTab = useEditor((s) => s.setAiTab);
 
   const [prompt, setPrompt] = useState('');
   const [running, setRunning] = useState(false);
@@ -182,13 +181,9 @@ export function AiModelTab() {
       <div>
         <div className="mb-2 flex items-baseline justify-between gap-2 px-1">
           <h3 className="text-[13px] font-bold text-ink">Made this session</h3>
-          <button
-            type="button"
-            className="text-[10px] font-semibold text-primary transition hover:underline"
-            onClick={() => setAiTab('assets')}
-          >
-            All generated assets →
-          </button>
+          <span className="text-[10px] text-ink-subtle">
+            All of them live on the <strong className="font-semibold text-ink">Assets</strong> tab
+          </span>
         </div>
 
         {made.length === 0 ? (

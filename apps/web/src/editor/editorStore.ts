@@ -352,29 +352,6 @@ interface EditorState {
   lastPlaced: { name: string; at: number } | null;
   notePlaced: (name: string) => void;
 
-  /* -- The AI section, driven from outside it ------------------------- */
-  /**
-   * Which tab of the AI section is open.
-   *
-   * Lifted out of the panel's own state because it is opened *at a particular
-   * tab* from four places that have nothing to do with each other — the button
-   * on the plan, the command palette, the header, and a panel handing work
-   * over. Threading a setter through the editor tree for one string is worse
-   * than a field here.
-   */
-  aiTab: 'concept' | 'assistant' | 'model' | 'artwork' | 'assets' | 'documents';
-  setAiTab: (tab: EditorState['aiTab']) => void;
-  /**
-   * A question to ask the assistant the moment it opens, consumed once.
-   *
-   * The command palette and several panels hand a question over rather than
-   * merely opening the panel, and an assistant that opens empty after you
-   * asked it something has lost the question.
-   */
-  aiSeed: string | null;
-  seedAiAsk: (text: string) => void;
-  takeAiSeed: () => string | null;
-
   /**
    * Bumped whenever something wants the left panel opened as well as chosen.
    *
@@ -932,16 +909,6 @@ export const useEditor = create<EditorState>((set, get) => ({
     set((s) => ({ workPanel: panel, panelRequest: s.panelRequest + 1 })),
   propertiesRequest: 0,
   requestProperties: () => set((s) => ({ propertiesRequest: s.propertiesRequest + 1 })),
-
-  aiTab: 'concept',
-  setAiTab: (aiTab) => set({ aiTab }),
-  aiSeed: null,
-  seedAiAsk: (text) => set({ aiSeed: text, aiTab: 'assistant' }),
-  takeAiSeed: () => {
-    const seed = get().aiSeed;
-    if (seed) set({ aiSeed: null });
-    return seed;
-  },
 
   lastPlaced: null,
   notePlaced: (name) => {

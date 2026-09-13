@@ -29,20 +29,36 @@ import {
   FileText,
   Image as ImageIcon,
   MessageSquare,
+  Sparkles,
   Wand2,
 } from 'lucide-react';
 import { AiConceptTab } from './ai/AiConceptTab';
 import { AiModelTab } from './ai/AiModelTab';
 import { AiArtworkTab } from './ai/AiArtworkTab';
 import { AiAssistantTab } from './ai/AiAssistantTab';
+import { AiAssetsTab } from './ai/AiAssetsTab';
 import { AiDocumentsTab } from './ai/AiDocumentsTab';
 
-type AiTab = 'concept' | 'model' | 'artwork' | 'assistant' | 'documents';
+type AiTab = 'concept' | 'model' | 'artwork' | 'assets' | 'assistant' | 'documents';
 
+/*
+ * The same five tabs, in the same order, plus one.
+ *
+ * **Assets** is where everything the AI has made can actually be put into the
+ * room. Generating worked; the 3D and Artwork grids held their results in
+ * per-session React state, so a reload lost them, and the only durable record
+ * lived on a separate page whose one action copied an asset into the catalogue
+ * and left you to go and find it. A generator whose output cannot reach the
+ * scene has done the easy half.
+ *
+ * It sits directly after the two tabs that produce the things it holds, which
+ * is where the work goes next.
+ */
 const TABS: Array<{ id: AiTab; label: string; icon: ReactNode }> = [
   { id: 'concept', label: 'Concept', icon: <Wand2 className="h-3.5 w-3.5" /> },
   { id: 'model', label: '3D', icon: <Boxes className="h-3.5 w-3.5" /> },
   { id: 'artwork', label: 'Artwork', icon: <ImageIcon className="h-3.5 w-3.5" /> },
+  { id: 'assets', label: 'Assets', icon: <Sparkles className="h-3.5 w-3.5" /> },
   { id: 'assistant', label: 'Ask', icon: <MessageSquare className="h-3.5 w-3.5" /> },
   { id: 'documents', label: 'Docs', icon: <FileText className="h-3.5 w-3.5" /> },
 ];
@@ -95,6 +111,7 @@ export function AiPanelSection() {
           {tab === 'concept' ? <AiConceptTab /> : null}
           {tab === 'model' ? <AiModelTab /> : null}
           {tab === 'artwork' ? <AiArtworkTab /> : null}
+          {tab === 'assets' ? <AiAssetsTab /> : null}
           {tab === 'documents' ? <AiDocumentsTab /> : null}
         </div>
       )}

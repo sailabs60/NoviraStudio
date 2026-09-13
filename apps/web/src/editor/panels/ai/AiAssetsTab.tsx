@@ -59,6 +59,9 @@ import {
 } from '@novira/shared';
 import { useEditor } from '../../editorStore';
 import { studio, type Creation } from '../../../lib/studioApi';
+import { draggableProps } from '../../useDropTarget';
+import type { DragPayload } from '../../dragStore';
+import type { ProviderAsset } from '../../../lib/assetsApi';
 import { assets } from '../../../lib/assetsApi';
 import { currentCamera } from '../../Viewport';
 import { toast } from '../../../components/ui';
@@ -406,8 +409,63 @@ function AssetCard({
     }
   };
 
+  /*
+   * What this card hands the viewport when it is dragged into it.
+   *
+   * The same payload shapes the catalogue and the online libraries already use,
+   * so a generated asset inherits the whole drop interaction rather than needing
+   * a parallel one: the ghost that stands on the floor at full size, the
+   * surface-height search that puts it on a stage rather than inside one, the
+   * snap, and — for an image — the decal behaviour when it is released over an
+   * object rather than over the floor.
+   *
+   * A model is dragged as a `catalog` item because that is what it becomes once
+   * placed. An image is dragged as an `image`, which is the payload that knows
+   * how to become either a printed panel or a graphic on a surface.
+   */
+  const dragPayload: DragPayload | null = !usable || !creation.resultUrl
+    ? null
+    : creation.kind === 'model'
+      ? {
+          kind: 'catalog',
+          item: {
+            id: -Math.abs(hashToInt(creation.id)),
+            name,
+            modelUrl: creation.resultUrl,
+            previewImage: creation.thumbnailUrl,
+            widthMm: null,
+            depthMm: null,
+            heightMm,
+            description: creation.refinedPrompt ?? `Generated from: ${creation.prompt}`,
+          } as unknown as CatalogItemDto,
+        }
+      : {
+          kind: 'image',
+          asset: {
+            source: 'novira-ai',
+            sourceAssetId: creation.id,
+            name,
+            imageUrl: creation.resultUrl,
+            thumbnailUrl: creation.thumbnailUrl,
+            sourceLabel: 'Generated in Novira',
+            license: 'Yours to use',
+          } as unknown as ProviderAsset,
+        };
+
   return (
-    <figure className="group relative flex flex-col overflow-hidden rounded-xl border border-line bg-surface">
+    <figure
+      {...(dragPayload ? draggableProps(dragPayload) : {})}
+      className={`group relative flex flex-col overflow-hidden rounded-xl border border-line bg-surface ${
+        dragPayload && !readOnly ? 'cursor-grab active:cursor-grabbing' : ''
+      }`}
+      title={
+        dragPayload && !readOnly
+          ? creation.kind === 'model'
+            ? 'Drag into the plan, or use the button below'
+            : 'Drag onto an object to print it on, or onto the floor for a standing panel'
+          : undefined
+      }
+    >
       <span className="relative block aspect-square w-full overflow-hidden bg-surface-sunken">
         {creation.thumbnailUrl || (creation.kind === 'image' && creation.resultUrl) ? (
           <img
@@ -440,6 +498,21 @@ function AssetCard({
         {failed ? (
           <span className="absolute inset-x-1.5 bottom-1.5 rounded bg-danger/90 px-1.5 py-0.5 text-center text-[9px] font-bold text-white">
             Failed · refunded
+          </span>
+        ) : null}
+
+        {/*
+          The drag hint, on hover.
+
+          Dragging is the faster gesture and the one a designer coming from any
+          other library in this product will try first — but nothing about a
+          tile announces that it can be dragged, so it needs saying. It appears
+          on hover rather than permanently, because a card carrying a permanent
+          instruction is a card that has stopped being a picture of the thing.
+        */}
+        {usable && !readOnly ? (
+          <span className="pointer-events-none absolute inset-x-1.5 bottom-1.5 rounded-md bg-ink/70 px-1.5 py-0.5 text-center text-[9px] font-semibold text-white opacity-0 backdrop-blur transition group-hover:opacity-100">
+            {creation.kind === 'model' ? 'Drag into the plan' : 'Drag onto an object'}
           </span>
         ) : null}
 
