@@ -172,11 +172,54 @@ export const assets = {
  */
 export function proxied(url: string | null | undefined): string | undefined {
   if (!url) return undefined;
-  if (url.startsWith('/') || url.startsWith('data:') || url.startsWith('blob:')) return url;
-  // Already ours: proxying our own origin would be a pointless extra hop, and
-  // double-wrapping a proxy URL produces a request for a request.
+  /*
+   * Anything already reachable without the proxy is left exactly as it is.
+   *
+   * This is not only an optimisation. The proxy refuses localhost and private
+   * addresses — it has to, or an authenticated open proxy becomes a
+   * server-side request forgery — so routing our *own* asset URLs through it
+   * turns a working file into a 403. In development the API serves generated
+   * models from `http://localhost:4100/static/...`, which is a different origin
+   * from the Vite dev server on 5174 and therefore looks remote; it is not.
+   *
+   * So the test is "will a browser fetch this without complaint", answered by
+   * comparing origins, rather than "does it start with a slash".
+   */
+  if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  if (isSameOrigin(url)) return url;
+  // Double-wrapping a proxy URL produces a request for a request.
   if (url.includes('/api/assets/proxy')) return url;
+  /*
+   * Our own API on another port, which is the development setup.
+   *
+   * Vite proxies `/api` and `/static` through to the API server, so the path
+   * alone is same-origin from the browser's point of view — and the file is
+   * ours, so there is nothing to protect against.
+   */
+  const local = localApiPath(url);
+  if (local) return local;
   return `/api/assets/proxy?url=${encodeURIComponent(url)}`;
+}
+
+/**
+ * Our own API's URL, reduced to the path the page can fetch directly.
+ *
+ * The API advertises absolute URLs for the files it stores, built from
+ * `PUBLIC_BASE_URL`. In production that is the same host as the site and
+ * `isSameOrigin` catches it; in development it is a second port, which looks
+ * cross-origin but is proxied by Vite at `/static` and `/api`. Returning the
+ * bare path uses that proxy instead of ours.
+ */
+function localApiPath(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    const servedByUs = parsed.pathname.startsWith('/static/') || parsed.pathname.startsWith('/api/');
+    const loopback = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+    if (servedByUs && loopback) return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    /* not a URL we can read — fall through to the proxy */
+  }
+  return undefined;
 }
 
 /**
