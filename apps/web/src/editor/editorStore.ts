@@ -24,8 +24,6 @@ import {
   type SavedView,
   type Vec3,
   type VenueSite,
-  type SiteFloor,
-  activeFloor as activeSiteFloor,
   refineSiteFromModel,
   type SiteBoundsMm,
 } from '@novira/shared';

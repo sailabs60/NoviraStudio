@@ -43,7 +43,6 @@ import {
   clampToBounds,
   expandBounds,
   withinBounds,
-  type SiteBoundsMm,
   DEFAULT_FLOOR_FINISH,
 } from '@novira/shared';
 import { useEditor } from './editorStore';

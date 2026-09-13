@@ -190,9 +190,25 @@ export function PlacementHud() {
  */
 export function PlacementEcho() {
   const last = useEditor((s) => s.lastPlaced);
+  const armed = useEditor((s) => s.pendingItem !== null);
   const undo = useEditor((s) => s.undo);
 
   if (!last) return null;
+
+  /*
+   * Silent while the cursor is still armed.
+   *
+   * Holding Shift keeps the cursor loaded so a run of twelve tables is twelve
+   * clicks — and during that run both this and the placement bar want the same
+   * strip at the top of the viewport. The bar wins, because it is the one
+   * carrying live information about the *next* placement; a confirmation of the
+   * last one stacked behind it would be unreadable and would say nothing the
+   * new object appearing on the floor has not already said.
+   *
+   * It still fires for the final placement of the run, which is the one where
+   * the cursor disarms and the offer of an undo is worth having.
+   */
+  if (armed) return null;
 
   return (
     <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center px-16">

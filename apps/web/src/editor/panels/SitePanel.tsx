@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Boxes, Building2, Check, MapPin, Search, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
@@ -27,7 +27,6 @@ import {
   Stat,
   TextInput,
   Toggle,
-  toast,
 } from '../../components/ui';
 
 /**
@@ -43,7 +42,6 @@ import {
  * route in as real, checkable geometry.
  */
 export function SitePanel() {
-  const planId = useEditor((s) => s.planId);
   const objects = useEditor((s) => s.scene.objects);
   const units = useEditor((s) => s.scene.units);
   const regionCode = useEditor((s) => s.scene.regionCode);
@@ -58,11 +56,8 @@ export function SitePanel() {
   const updateObject = useEditor((s) => s.updateObject);
   const deleteSelected = useEditor((s) => s.deleteSelected);
   const focusObject = useEditor((s) => s.focusObject);
-  const replaceScene = useEditor((s) => s.replaceScene);
   const readOnly = useEditor((s) => s.readOnly);
-  const requestFrameAll = useEditor((s) => s.requestFrameAll);
 
-  const queryClient = useQueryClient();
   const [venueQuery, setVenueQuery] = useState('');
 
   const constraints = objects.filter((o): o is ConstraintSceneObject => o.type === 'constraint');
