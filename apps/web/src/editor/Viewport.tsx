@@ -2672,6 +2672,35 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
   const shadowsWanted = lighting.shadowsEnabled && profile.shadowMapSize > 0 && shadowsAffordable;
 
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  /*
+   * The grid sits on the floor being worked on, not on the world plane.
+   *
+   * It was pinned twelve millimetres above y = 0, which is the floor of an
+   * empty plan and of nothing else. In a building whose ground floor sits above
+   * the model origin — or on any storey above the first — that puts the grid
+   * *inside the slab*, where it is either invisible or, worse, visible in
+   * z-fighting stripes through the floor somebody is designing on.
+   *
+   * The grid's whole job is to tell you the scale of what is under the cursor,
+   * and it can only do that from the surface things are standing on.
+   */
+  const site = useEditor((s) => s.venueSite);
+  const gridY = useMemo(() => {
+    const floorMm = site ? activeSiteFloor(site).elevationMm : 0;
+    /*
+     * Well clear of the slab rather than a hair above it.
+     *
+     * Twelve millimetres works against the plan's own flat ground, and fails
+     * against a real building: an imported floor is a solid with thickness, its
+     * top face is not exactly at the recorded storey height, and a grid a
+     * centimetre above the *bottom* of it is buried in concrete — or, worse,
+     * z-fighting through it in stripes. Thirty millimetres clears any floor
+     * finish, is well under the height of anything that stands on it, and
+     * cannot be seen as a gap from a working viewpoint.
+     */
+    return mmToWorld(floorMm) + (site ? 0.03 : 0.012);
+  }, [site]);
   // Which objects the instanced renderer has taken responsibility for.
   const { instancedIds } = useInstancedBatches();
 
@@ -2782,7 +2811,7 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
            * way to the horizon and streaks the backdrop. Ending it well inside
            * the studio is the closest a plain grid gets to fading out.
            */
-          <gridHelper args={[60, 30, '#c9d2de', '#e3e8ef']} position={[0, 0.012, 0]} />
+          <gridHelper args={[60, 30, '#c9d2de', '#e3e8ef']} position={[0, gridY, 0]} />
         ) : (
           /*
            * A drafting grid, not a wireframe.
@@ -2795,7 +2824,7 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
            */
           <Grid
             args={[120, 120]}
-            position={[0, 0.012, 0]}
+            position={[0, gridY, 0]}
             cellSize={1}
             cellThickness={0.6}
             cellColor="#c6cfdb"

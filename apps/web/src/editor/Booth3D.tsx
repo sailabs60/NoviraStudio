@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { sharedMaterial } from './sharedMaterials';
+import { InstancedBoxes, type BoxPlacement } from './InstancedBoxes';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
 import {
@@ -63,6 +63,38 @@ export function Booth3D({ booth, selected }: Props) {
 
   const wallColor = selected ? '#8b8ff0' : booth.wallColor || finish.color;
   const hasError = derived.warnings.some((w) => w.severity === 'error');
+
+  /*
+   * Where every system post goes.
+   *
+   * Derived once per shape instead of rebuilt as React elements each render,
+   * and flattened across all the walled sides into one array because they are
+   * all the same extrusion — one batch, whatever the stand's shape.
+   */
+  const systemPosts = useMemo<BoxPlacement[]>(() => {
+    if (booth.wallFinish !== 'modular-system') return [];
+    const sides = Array.isArray(booth.walls) ? booth.walls : [];
+    const out: BoxPlacement[] = [];
+
+    for (const side of sides) {
+      const transform = sideTransform(side, booth.widthMm, booth.depthMm);
+      const runMm = side === 'front' || side === 'back' ? booth.widthMm : booth.depthMm;
+      const bays = Math.max(1, Math.round(runMm / 1000));
+      const alongX = side === 'front' || side === 'back';
+
+      for (let i = 0; i <= bays; i += 1) {
+        const offset = mmToWorld(-runMm / 2 + (i * runMm) / bays);
+        out.push({
+          position: [
+            alongX ? offset : transform.position[0],
+            platformM + heightM / 2,
+            alongX ? transform.position[2] : offset,
+          ],
+        });
+      }
+    }
+    return out;
+  }, [booth.wallFinish, booth.walls, booth.widthMm, booth.depthMm, platformM, heightM]);
 
   return (
     <group>
@@ -136,41 +168,25 @@ export function Booth3D({ booth, selected }: Props) {
         than a stand — and the panel module is what an exhibitor's graphics are
         designed to.
       */}
-      {booth.wallFinish === 'modular-system'
-        ? (Array.isArray(booth.walls) ? booth.walls : []).flatMap((side) => {
-            const transform = sideTransform(side, booth.widthMm, booth.depthMm);
-            const runMm = side === 'front' || side === 'back' ? booth.widthMm : booth.depthMm;
-            const bays = Math.max(1, Math.round(runMm / 1000));
-            const along = side === 'front' || side === 'back' ? 'x' : 'z';
-            const post = mmToWorld(46);
+      {/*
+        Drawn as one batch rather than a mesh per post.
 
-            return Array.from({ length: bays + 1 }).map((_, i) => {
-              const offset = mmToWorld(-runMm / 2 + (i * runMm) / bays);
-              return (
-                <mesh
-                  key={`post-${side}-${i}`}
-                  position={[
-                    along === 'x' ? offset : transform.position[0],
-                    platformM + heightM / 2,
-                    along === 'x' ? transform.position[2] : offset,
-                  ]}
-                  castShadow
-                  userData={{ part: 'system-frame' }}
-                >
-                  <boxGeometry args={[post, heightM, post]} />
-                  {/*
-                    Shared: every post on every stand is the same grey metal,
-                    and a separate material each is what stops them batching.
-                  */}
-                  <primitive
-                    object={sharedMaterial({ color: '#c3c8cf', metalness: 0.7, roughness: 0.32 })}
-                    attach="material"
-                  />
-                </mesh>
-              );
-            });
-          })
-        : null}
+        A shell scheme is a post per metre on every walled side, so a 6 x 3 m
+        stand is thirteen of them and a hall of thirteen stands is a hundred and
+        seventy identical grey extrusions — enough, measured alongside the
+        stage, to be a real share of the draw calls in a finished exhibition
+        plan. They differ only in position, which is what instancing is for.
+      */}
+      {booth.wallFinish === 'modular-system' && systemPosts.length ? (
+        <InstancedBoxes
+          part="system-frame"
+          size={[mmToWorld(46), heightM, mmToWorld(46)]}
+          color="#c3c8cf"
+          metalness={0.7}
+          roughness={0.32}
+          placements={systemPosts}
+        />
+      ) : null}
 
       {/* Fascia across the front, standing proud of the wall line. */}
       {booth.fascia ? (
