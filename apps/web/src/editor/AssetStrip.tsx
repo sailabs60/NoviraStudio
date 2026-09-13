@@ -24,6 +24,7 @@ import { spatial } from '../lib/spatialApi';
 import { assets } from '../lib/assetsApi';
 import { LazyImage } from '../components/LazyImage';
 import { useEditor } from './editorStore';
+import { useApplyVenue } from './useApplyVenue';
 import { createBooth } from './factories';
 import { draggableProps } from './useDropTarget';
 import { Modal } from '../components/Modal';
@@ -265,36 +266,7 @@ function HallShelf() {
         ))}
 
         {venues?.items.map((venue) => (
-          <Link
-            key={`venue-${venue.id}`}
-            to="/venues"
-            className="flex w-[188px] shrink-0 flex-col justify-between rounded-lg border border-line bg-surface p-2.5 transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-card"
-          >
-            <span>
-              {/*
-                The room itself, when there is a photo of it. A venue is a
-                place, and a card that shows only its name makes every
-                ballroom in the same hotel look identical — which is exactly
-                the moment someone is choosing between them.
-              */}
-              {venue.previewUrl ? (
-                <img
-                  src={venue.previewUrl}
-                  alt=""
-                  loading="lazy"
-                  className="mb-1.5 h-16 w-full rounded border border-line object-cover"
-                />
-              ) : (
-                <Building2 className="h-4 w-4 text-primary" />
-              )}
-              <span className="mt-1.5 block truncate text-[11px] font-semibold text-ink">{venue.name}</span>
-              <span className="block truncate text-[9px] text-ink-subtle">
-                {venue.city}
-                {venue.country ? `, ${venue.country}` : ''}
-              </span>
-            </span>
-            <span className="mt-2 text-[9px] font-semibold text-primary">Open the venue library →</span>
-          </Link>
+          <VenueCard key={`venue-${venue.id}`} venue={venue} />
         ))}
       </Shelf>
 
@@ -317,6 +289,151 @@ function HallShelf() {
           Loading <strong className="text-ink">{pending?.title}</strong> replaces everything currently in this
           plan — {objectCount} object{objectCount === 1 ? '' : 's'}. Undo puts it back, but nothing is saved to the
           server until the next autosave.
+        </p>
+      </Modal>
+    </>
+  );
+}
+
+/**
+ * One venue on the shelf — the room, and the one button that matters.
+ *
+ * This card used to be a link to `/venues`. That is a navigation away from the
+ * plan someone is building, to a page where the venue can be read about and
+ * not used; the actual way to get a building into a plan was a different
+ * control in a different panel, and nothing on the card said so. A picture of
+ * a ballroom with "Open the venue library →" underneath it is a promise the
+ * card does not keep.
+ *
+ * So the verb is now **Use this venue**, it applies the building to the open
+ * plan in place, and the library link — which is a real thing somebody
+ * occasionally wants — is demoted to a quiet secondary affordance on the
+ * card's own title.
+ *
+ * What arrives is not only a mesh. Applying a venue records the room: its
+ * floor, its storeys and the extent of its interior (see `useApplyVenue` and
+ * `venueSite.ts`), which is what lets the viewport frame the hall rather than
+ * the car park and keeps furniture landing on the right storey.
+ */
+function VenueCard({
+  venue,
+}: {
+  venue: {
+    id?: number | null;
+    name: string;
+    city: string;
+    country: string;
+    previewUrl?: string | null;
+    modelUrl?: string | null;
+    widthMm: number;
+    depthMm: number;
+    capacity: { banquet: number };
+  };
+}) {
+  const { apply, applying } = useApplyVenue();
+  const readOnly = useEditor((s) => s.readOnly);
+  const objectCount = useEditor((s) => s.scene.objects.length);
+  const [confirming, setConfirming] = useState(false);
+
+  const busy = applying === venue.id;
+  /*
+   * Applying a venue replaces any venue already there and rewrites the floor,
+   * so a plan that already has work in it gets asked first — the same courtesy
+   * loading a template gets, and for the same reason.
+   */
+  const needsConfirm = objectCount > 0;
+
+  const go = () => {
+    if (!venue.id) return;
+    if (needsConfirm && !confirming) {
+      setConfirming(true);
+      return;
+    }
+    setConfirming(false);
+    void apply(venue.id);
+  };
+
+  return (
+    <>
+      <div className="flex w-[188px] shrink-0 flex-col overflow-hidden rounded-lg border border-line bg-surface transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-card">
+        {/*
+          The room itself, when there is a photo of it. A venue is a place, and
+          a card that shows only its name makes every ballroom in the same
+          hotel look identical — which is exactly the moment someone is
+          choosing between them.
+        */}
+        {venue.previewUrl ? (
+          <img
+            src={venue.previewUrl}
+            alt=""
+            loading="lazy"
+            className="h-20 w-full border-b border-line object-cover"
+          />
+        ) : (
+          <span className="flex h-20 w-full items-center justify-center border-b border-line bg-surface-muted">
+            <Building2 className="h-5 w-5 text-ink-subtle/60" />
+          </span>
+        )}
+
+        <div className="flex min-w-0 flex-1 flex-col p-2">
+          <p className="truncate text-[11px] font-semibold text-ink" title={venue.name}>
+            {venue.name}
+          </p>
+          <p className="truncate text-[9px] text-ink-subtle">
+            {venue.city}
+            {venue.country ? `, ${venue.country}` : ''}
+          </p>
+          {/*
+            The two figures that decide whether this room is the one: how big
+            it is, and how many people it seats. Both are on the record
+            already and neither was shown.
+          */}
+          <p className="mt-0.5 truncate text-[9px] tabular-nums text-ink-muted">
+            {(venue.widthMm / 1000).toFixed(0)} × {(venue.depthMm / 1000).toFixed(0)} m
+            {venue.capacity?.banquet ? ` · ${venue.capacity.banquet} banquet` : ''}
+          </p>
+
+          <button
+            type="button"
+            className="ed-action-primary mt-1.5 w-full justify-center"
+            disabled={readOnly || busy || !venue.id}
+            onClick={go}
+          >
+            {busy ? 'Applying…' : 'Use this venue'}
+          </button>
+
+          {/*
+            Still reachable, and now honest about what it is: a way to read the
+            record rather than the way to use it.
+          */}
+          <Link
+            to="/venues"
+            className="mt-1 block text-center text-[9px] font-semibold text-ink-subtle transition hover:text-primary"
+          >
+            View its details
+          </Link>
+        </div>
+      </div>
+
+      <Modal
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        title={`Design inside ${venue.name}?`}
+        footer={
+          <>
+            <button type="button" className="btn-secondary" onClick={() => setConfirming(false)}>
+              Keep what I have
+            </button>
+            <button type="button" className="btn-primary" onClick={go}>
+              Use this venue
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-relaxed text-ink-muted">
+          The building, its floor and its constraints come into this plan, replacing any venue already applied. The{' '}
+          {objectCount} object{objectCount === 1 ? '' : 's'} you have placed stay exactly where they are — so check
+          they still sit inside the room afterwards. Undo puts it all back.
         </p>
       </Modal>
     </>

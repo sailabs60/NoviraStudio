@@ -14,6 +14,7 @@ import {
 import { useEditor } from '../editorStore';
 import { VenuePanel } from '../VenuePanel';
 import { spatial } from '../../lib/spatialApi';
+import { useApplyVenue } from '../useApplyVenue';
 import {
   ColorField,
   EmptyState,
@@ -63,8 +64,6 @@ export function SitePanel() {
 
   const queryClient = useQueryClient();
   const [venueQuery, setVenueQuery] = useState('');
-  const [applying, setApplying] = useState<number | null>(null);
-  const [venueWarnings, setVenueWarnings] = useState<string[]>([]);
 
   const constraints = objects.filter((o): o is ConstraintSceneObject => o.type === 'constraint');
   const selected = constraints.find((c) => c.id === selectedId);
@@ -75,29 +74,18 @@ export function SitePanel() {
     staleTime: 60_000,
   });
 
-  const applyVenue = async (venueId: number) => {
-    if (!planId) return;
-    setApplying(venueId);
-    try {
-      const result = await spatial.venues.applyToPlan(venueId, planId);
-      replaceScene(result.scene);
-      setVenueWarnings(result.warnings);
-      void queryClient.invalidateQueries({ queryKey: ['plan-review'] });
-      toast(
-        'success',
-        result.venue.modelUrl
-          ? `${result.venue.name} is in the plan — the building, plus ${result.applied} constraints. It may take a moment to load.`
-          : `${result.venue.name}: ${result.applied} constraints applied to this plan.`
-      );
-      // A building is much larger than whatever the camera was framing, so
-      // show the room rather than leaving the view inside a wall.
-      if (result.venue.modelUrl) requestFrameAll();
-    } catch {
-      toast('error', 'Could not apply that venue. Check that the plan is saved and try again.');
-    } finally {
-      setApplying(null);
-    }
-  };
+  /*
+   * One apply path, shared with the venue card on the templates shelf.
+   *
+   * The two used to be different code doing different things — this one
+   * applied the venue properly, the card merely linked to another page — and
+   * more importantly only this one existed at all, so the fact that it also
+   * has to record *the room* (its floor, its storeys, the extent of its
+   * interior) had nowhere else to live. See `useApplyVenue`.
+   */
+  const venueApply = useApplyVenue();
+  const applying = venueApply.applying;
+  const venueWarnings = venueApply.warnings;
 
   return (
     <>
@@ -172,7 +160,7 @@ export function SitePanel() {
                   type="button"
                   className="ed-action-primary mt-1.5 w-full justify-center"
                   disabled={readOnly || applying === venue.id}
-                  onClick={() => void applyVenue(venue.id!)}
+                  onClick={() => void venueApply.apply(venue.id!)}
                 >
                   {applying === venue.id ? 'Applying…' : 'Use this venue'}
                 </button>

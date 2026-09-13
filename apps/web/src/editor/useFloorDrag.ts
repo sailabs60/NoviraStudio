@@ -23,10 +23,13 @@ import { pickPlacement, surfaceHeightAt } from './picking';
  *    not to the pointer, so it does not jump so its origin snaps under the
  *    cursor the moment the drag starts.
  *
- *  · **One undo entry.** Live updates go through `commitQuiet`, which does not
- *    touch history; the original position is restored and re-applied once on
- *    release so a single Ctrl+Z puts it back where it was, rather than
- *    replaying two hundred mouse positions.
+ *  · **One undo entry, and no cloning.** Live updates go through
+ *    `moveObjectsLive`, which neither writes history nor deep-clones the
+ *    document — the drag runs at pointer-move frequency, and cloning a
+ *    500-object plan sixty times a second is what made this gesture stutter on
+ *    exactly the plans it matters on. The original position is restored and
+ *    re-applied once on release, so a single Ctrl+Z puts the object back where
+ *    it was rather than replaying two hundred mouse positions.
  *
  *  · **Orbit stands down.** OrbitControls owns right-drag for panning, so it is
  *    disabled for the duration and the context menu is suppressed — otherwise
@@ -132,16 +135,17 @@ export function useFloorDrag(orbitRef: React.MutableRefObject<any>) {
 
       drag.moved = true;
       drag.lastY = y;
-      // Quiet: two hundred pointer moves must not become two hundred undo steps.
-      editor.commitQuiet((draft) => {
-        const index = draft.objects.findIndex((o) => o.id === drag.objectId);
-        if (index >= 0) {
-          draft.objects[index] = {
-            ...draft.objects[index]!,
-            positionMm: { x, y, z },
-          } as SceneObject;
-        }
-      });
+      /*
+       * The live path, which neither writes history nor clones the document.
+       *
+       * This runs on every pointer move. `commitQuiet` — which it used to call
+       * — deep-clones the whole scene, so pushing a chair across a 504-object
+       * plan cloned several hundred kilobytes of JSON sixty times a second and
+       * gave every object in the plan a new identity each time, invalidating
+       * every memo downstream. That cost landed on the same main thread as the
+       * renderer, during the one gesture that has to feel direct.
+       */
+      editor.moveObjectsLive([{ id: drag.objectId, positionMm: { x, y, z } }]);
 
       setState({ objectId: drag.objectId, positionMm: { x, y, z }, onSurface: Math.abs(y) > 20 });
     };
@@ -169,12 +173,10 @@ export function useFloorDrag(orbitRef: React.MutableRefObject<any>) {
       if (!current) return;
       const settled = current.positionMm;
 
-      editor.commitQuiet((draft) => {
-        const index = draft.objects.findIndex((o) => o.id === drag.objectId);
-        if (index >= 0) {
-          draft.objects[index] = { ...draft.objects[index]!, positionMm: drag.origin } as SceneObject;
-        }
-      });
+      // Put it back where it started without touching history, then commit the
+      // move it actually made — so one Ctrl+Z returns it to where the gesture
+      // began rather than to the previous mouse position.
+      editor.moveObjectsLive([{ id: drag.objectId, positionMm: drag.origin }]);
       editor.commit((draft) => {
         const index = draft.objects.findIndex((o) => o.id === drag.objectId);
         if (index >= 0) {

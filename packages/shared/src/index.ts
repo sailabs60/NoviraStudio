@@ -27,6 +27,7 @@ export * from './furnish.js';
 export * from './walkthrough.js';
 export * from './region.js';
 export * from './venueLibrary.js';
+export * from './venueSite.js';
 export * from './dxf.js';
 export * from './planDrawing.js';
 export * from './insights.js';

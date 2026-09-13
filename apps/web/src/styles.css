@@ -336,6 +336,17 @@ body {
   .ai-card-title {
     @apply text-[15px] font-bold leading-tight text-ink;
   }
+  /* The tinted icon tile beside a card's title, as the reference design has
+     it. Small, but it is what makes a column of cards scannable — the eye
+     finds the blue square and reads the heading beside it, rather than
+     reading five headings to find the one it wants. */
+  .ai-card-icon {
+    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary;
+  }
+  /* Title row: the tile and the heading, with the note underneath both. */
+  .ai-card-head {
+    @apply flex items-center gap-2.5;
+  }
   .ai-card-note {
     @apply mt-1 text-[12px] leading-relaxed text-ink-muted;
   }

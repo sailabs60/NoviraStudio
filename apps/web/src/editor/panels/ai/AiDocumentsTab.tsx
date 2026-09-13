@@ -93,7 +93,12 @@ export function AiDocumentsTab() {
   return (
     <div className="space-y-3">
       <div className="ai-card">
-        <h3 className="ai-card-title">AI Document Generation</h3>
+        <div className="ai-card-head">
+          <span className="ai-card-icon">
+            <FileText className="h-4 w-4" />
+          </span>
+          <h3 className="ai-card-title">AI Document Generation</h3>
+        </div>
         <p className="ai-card-note">Create professional documents instantly from your event details.</p>
 
         {designBrief ? (

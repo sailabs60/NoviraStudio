@@ -18,6 +18,7 @@ import {
   emptyVenueSpec,
   migrateScene,
   regionForCountry,
+  siteFromVenueSpec,
   VENUE_SPACE_TYPES,
   venueWarnings,
   type ConstraintSceneObject,
@@ -667,6 +668,24 @@ venueLibraryRouter.post(
         };
       }
     }
+
+    /*
+     * Record the room, not just its contents.
+     *
+     * The objects above are what the plan *holds*; this is what the plan is
+     * *in* — where its floor is, what storeys it has, and how far its interior
+     * extends. Everything downstream reads it: the viewport frames the hall
+     * rather than the car park the model happens to include, placement lands
+     * furniture on the storey being designed rather than at y = 0, and the
+     * camera can be kept inside the walls.
+     *
+     * Written here rather than only in the browser so that a venue applied by
+     * any other route — a template, an import, a future API client — produces a
+     * plan that knows the same things about itself. The editor refines the one
+     * figure that cannot be known without the geometry (how much of the model
+     * is exterior) once the mesh has loaded.
+     */
+    scene.venueSite = siteFromVenueSpec(spec, spec.modelUrl ? `venue-model-${row.id}` : null);
 
     if (body.adoptRegion) scene.regionCode = spec.regionCode;
     scene.showConstraints = true;

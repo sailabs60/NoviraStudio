@@ -15,8 +15,9 @@
  */
 import { useMemo, useState } from 'react';
 import { Check, Image as ImageIcon, Loader2, Sparkles, Upload } from 'lucide-react';
-import type { SceneObject } from '@novira/shared';
+import { DEFAULT_ARTWORK, type ArtworkSceneObject, type SceneObject } from '@novira/shared';
 import { useEditor } from '../../editorStore';
+import { currentCamera } from '../../Viewport';
 import { pollJob } from '../../../lib/spatialApi';
 import { studio } from '../../../lib/studioApi';
 import { toast } from '../../../components/ui';
@@ -73,6 +74,7 @@ interface Made {
 export function AiArtworkTab() {
   const scene = useEditor((s) => s.scene);
   const updateObject = useEditor((s) => s.updateObject);
+  const addObjects = useEditor((s) => s.addObjects);
   const readOnly = useEditor((s) => s.readOnly);
   const planId = useEditor((s) => s.planId);
   const designBrief = useEditor((s) => s.scene.designBrief);
@@ -136,30 +138,95 @@ export function AiArtworkTab() {
     }
   };
 
+  /**
+   * Put a generated graphic into the room.
+   *
+   * ## The dead end this removes
+   *
+   * This used to require a surface to already exist. Generate a logo on a plan
+   * with no branding panel in it and the answer was "There are no branding
+   * panels yet. Build an event with branding first" — which is a generator
+   * telling the designer to go and do something else before it will finish its
+   * own job. The artwork had been paid for and generated and there was no way
+   * at all to get it into the scene.
+   *
+   * ## What it does now
+   *
+   * It puts it on the surfaces that exist, and when none do it **makes one**.
+   * A free-standing graphic panel is a real object in this editor — it can be
+   * moved, mounted on a wall, resized and costed — so standing the artwork up
+   * as one is not a workaround, it is the same thing a designer would have done
+   * by hand, minus the four steps.
+   *
+   * The panel is sized from the artwork's own kind rather than to a fixed
+   * rectangle: a poster is portrait, a banner is tall and narrow, a screen
+   * graphic is wide. A 3:4 poster stretched across a 9 m wall is exactly the
+   * sort of thing that made the old flow produce images nobody could use.
+   */
   const apply = (item: Made) => {
     if (readOnly) return;
     const toScreens = item.kind === 'screen';
     const targets = toScreens ? surfaces.screens : surfaces.panels;
 
-    if (!targets.length) {
-      toast(
-        'info',
-        toScreens
-          ? 'There is no LED screen in this plan to put it on.'
-          : 'There are no branding panels yet. Build an event with branding first.'
-      );
+    if (targets.length) {
+      for (const target of targets) {
+        updateObject(
+          target.id,
+          (toScreens ? { contentUrl: item.url } : { imageUrl: item.url }) as Partial<SceneObject>
+        );
+      }
+      toast('success', `Applied to ${targets.length} ${targets.length === 1 ? 'surface' : 'surfaces'}.`, {
+        label: 'Undo',
+        onClick: () => useEditor.getState().undo(),
+      });
       return;
     }
-    for (const target of targets) {
-      updateObject(
-        target.id,
-        (toScreens ? { contentUrl: item.url } : { imageUrl: item.url }) as Partial<SceneObject>
-      );
-    }
-    toast('success', `Applied to ${targets.length} ${targets.length === 1 ? 'surface' : 'surfaces'}.`, {
-      label: 'Undo',
-      onClick: () => useEditor.getState().undo(),
-    });
+
+    /*
+     * Nothing to put it on, so stand it up.
+     *
+     * Placed in front of whatever the camera is looking at rather than at the
+     * origin: on a plan already laid out, the origin is under a table, and an
+     * object that arrives where it cannot be seen reads as a failure.
+     */
+    const shape = KINDS.find((k) => k.id === item.kind)!;
+    const [w, h] = shape.aspect.split(':').map(Number);
+    const ratio = w && h ? w / h : 1;
+    // A panel someone can read from across a room: 2.4 m tall for a portrait
+    // piece, wider than it is tall for a landscape one.
+    const heightMm = ratio >= 1 ? 2400 : 2800;
+
+    const camera = currentCamera();
+    const spot = camera
+      ? { x: Math.round(camera.targetMm.x), z: Math.round(camera.targetMm.z) }
+      : { x: 0, z: 0 };
+
+    addObjects([
+      {
+        ...DEFAULT_ARTWORK,
+        id: crypto.randomUUID(),
+        type: 'artwork',
+        name: `${shape.label.replace(/s$/, '')} — ${subject.trim() || 'generated'}`.slice(0, 80),
+        imageUrl: item.url,
+        sourceLabel: 'Generated in Novira',
+        license: 'Yours to use',
+        widthMm: Math.round(heightMm * ratio),
+        heightMm,
+        aspectRatio: ratio,
+        mount: 'free',
+        positionMm: { x: spot.x, y: 0, z: spot.z },
+        rotationDeg: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      } as ArtworkSceneObject as SceneObject,
+    ]);
+
+    toast(
+      'success',
+      toScreens
+        ? 'No screen in the plan yet, so it is standing as a graphic panel — move it or mount it on a wall.'
+        : 'Standing in the plan as a graphic panel — move it, or mount it on a wall from the properties panel.',
+      { label: 'Undo', onClick: () => useEditor.getState().undo() }
+    );
   };
 
   const upload = (file: File) => {
@@ -177,7 +244,12 @@ export function AiArtworkTab() {
   return (
     <div className="space-y-3">
       <div className="ai-card">
-        <h3 className="ai-card-title">AI Artwork Generation</h3>
+        <div className="ai-card-head">
+          <span className="ai-card-icon">
+            <ImageIcon className="h-4 w-4" />
+          </span>
+          <h3 className="ai-card-title">AI Artwork Generation</h3>
+        </div>
         <p className="ai-card-note">Create logos, banners, posters, and more for your event.</p>
 
         <div className="mt-3 flex gap-1.5">

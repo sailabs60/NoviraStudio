@@ -18,6 +18,7 @@ import type { BoothFloorFinish, BoothSide, BoothType, BoothWallFinish } from './
  */
 
 import type { FinishMap, SurfaceFinish } from './materials.js';
+import type { VenueSite } from './venueSite.js';
 
 import type { CameraMode, UnitSystem } from './index.js';
 
@@ -621,10 +622,29 @@ export interface SceneCamera {
   pathSpeed: number;
 }
 
+/**
+ * Where a new plan opens.
+ *
+ * Raised and pulled back from the old (8 m, 6 m, 8 m). That vantage is eleven
+ * metres from the origin at a shallow angle, which puts the horizon across the
+ * middle of the frame and sends the grid off to a vanishing point — so an empty
+ * plan opened looking at a wedge of floor and a great deal of nothing, and gave
+ * no sense of the scale of the space about to be drawn.
+ *
+ * Eighteen metres out and thirteen up is a steeper three-quarter view looking
+ * *down* at the floor rather than across it. The grid fills the frame, the
+ * horizon is off the top of it, and the first thing placed arrives at a size
+ * that reads correctly against the metre squares around it.
+ *
+ * The target is lifted off the deck for the same reason: aiming at the floor
+ * plane exactly puts it on the centre line of the view, and aiming slightly
+ * above it leaves the ground occupying the lower two-thirds of the frame, which
+ * is the composition every architectural view uses.
+ */
 export const DEFAULT_CAMERA: SceneCamera = {
   mode: 'perspective',
-  positionMm: { x: 8000, y: 6000, z: 8000 },
-  targetMm: ZERO,
+  positionMm: { x: 13000, y: 13000, z: 18000 },
+  targetMm: { x: 0, y: 900, z: 0 },
   fov: 50,
   path: [],
   pathSpeed: 1,
@@ -806,6 +826,21 @@ export interface SceneDocument {
    * Absent on plans drawn by hand, which is the honest answer for those.
    */
   designBrief?: DesignBrief | null;
+
+  /**
+   * The room this plan is set in, once a venue has been applied.
+   *
+   * Absent on a plan drawn on open ground, and every consumer treats that as
+   * "no room known" rather than as an error — the viewport frames the whole
+   * scene, placement uses the ground plane, and the camera is unconstrained,
+   * which is exactly how the editor behaved before venues could be applied.
+   *
+   * When it *is* present it is the single answer to "where is the floor and
+   * where do the walls stop", read by framing, placement, navigation and the
+   * floor switcher alike. See `venueSite.ts` for why it is recorded rather
+   * than measured on demand.
+   */
+  venueSite?: VenueSite | null;
 }
 
 /** The brief a generated plan was built from, kept with the plan. */
@@ -933,5 +968,18 @@ export function migrateScene(input: unknown): SceneDocument {
     collisionCheck: typeof doc.collisionCheck === 'boolean' ? doc.collisionCheck : base.collisionCheck,
     views: Array.isArray(doc.views) ? doc.views : [],
     showConstraints: typeof doc.showConstraints === 'boolean' ? doc.showConstraints : base.showConstraints,
+    /*
+     * Carried through only when it is well formed.
+     *
+     * A site with no floors would have every consumer reaching into an empty
+     * array for "the storey we are on", and a half-written one from an
+     * interrupted save is exactly the sort of row that reaches this function.
+     * Dropping it degrades the plan to open-ground behaviour, which is
+     * correct and visible, rather than throwing inside the renderer.
+     */
+    venueSite:
+      doc.venueSite && Array.isArray(doc.venueSite.floors) && doc.venueSite.floors.length
+        ? doc.venueSite
+        : null,
   };
 }

@@ -260,6 +260,26 @@ export function EditorPage() {
   useKeyboardShortcuts(save, { setLeftOpen, setRightOpen });
 
   /*
+   * Something asked for a panel, so open the sidebar it lives in.
+   *
+   * Choosing a rail section from inside the viewport — the Ask Novira button,
+   * the command palette, a quick-menu entry — is meaningless while the sidebar
+   * beside the rail is shut, and none of those callers can reach this
+   * component's state. The store carries the request; this is the only place
+   * that can act on it. See `requestPanel`.
+   */
+  const panelRequest = useEditor((s) => s.panelRequest);
+  useEffect(() => {
+    if (panelRequest > 0) setLeftOpen(true);
+  }, [panelRequest]);
+
+  // And the same for the properties dock — see `requestProperties`.
+  const propertiesRequest = useEditor((s) => s.propertiesRequest);
+  useEffect(() => {
+    if (propertiesRequest > 0) setRightOpen(true);
+  }, [propertiesRequest]);
+
+  /*
    * The properties dock asks for the environment window by event rather than by
    * a threaded callback. It is three components deep and the alternative is
    * passing a setter through every one of them for a single dialog.

@@ -15,6 +15,7 @@ import { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  Building2,
   Check,
   Loader2,
   Mic,
@@ -103,6 +104,24 @@ export function AiConceptTab() {
     }
   };
 
+  /**
+   * The elements the concept holds, counted by kind and named in plain words.
+   *
+   * `round-table` is what the engine calls it and `round tables` is what a
+   * person calls it, and the panel is read by a person.
+   */
+  const plannedCounts = useMemo(() => {
+    if (!concept) return [];
+    const counts = new Map<string, number>();
+    for (const element of concept.elements) {
+      const label = element.kind.replace(/-/g, ' ');
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([kind, count]) => [count === 1 ? kind : `${kind}s`, count] as const);
+  }, [concept]);
+
   const build = () => {
     if (!concept || readOnly) return;
     setBuilding(true);
@@ -190,7 +209,12 @@ export function AiConceptTab() {
   return (
     <div className="space-y-3">
       <div className="ai-card">
-        <h3 className="ai-card-title">AI Conceptualization</h3>
+        <div className="ai-card-head">
+          <span className="ai-card-icon">
+            <Wand2 className="h-4 w-4" />
+          </span>
+          <h3 className="ai-card-title">AI Conceptualization</h3>
+        </div>
         <p className="ai-card-note">
           Describe your event vision and let AI turn it into a complete concept.
         </p>
@@ -236,22 +260,39 @@ export function AiConceptTab() {
           </p>
         ) : null}
 
-        <div className="mt-2 flex flex-wrap gap-1 pl-9">
-          {EXAMPLES.map((example) => (
-            <button
-              key={example}
-              type="button"
-              className="ai-pill border border-line"
-              title={example}
-              onClick={() => {
-                setPrompt(example);
-                read(example);
-              }}
-            >
-              {example.slice(0, 26)}…
-            </button>
-          ))}
-        </div>
+        {/*
+          The examples, readable.
+
+          They were pills truncated to 26 characters, which turned three
+          genuinely useful starting briefs into "Create a modern corporate …",
+          "A wedding reception for 15…" and "An awards evening for 400 …" — three
+          near-identical grey stubs that say nothing about what each one would
+          produce. The point of an example brief is that reading it teaches you
+          how to write one, and a truncated one teaches nothing.
+
+          Only shown while the box is empty. Once there is a brief in it they
+          are noise, and the space belongs to what the engine made of it.
+        */}
+        {!prompt.trim() ? (
+          <div className="mt-2.5 space-y-1 pl-9">
+            <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-subtle">
+              Or start from one of these
+            </p>
+            {EXAMPLES.map((example) => (
+              <button
+                key={example}
+                type="button"
+                className="block w-full rounded-lg border border-line bg-surface px-2.5 py-1.5 text-left text-[11px] leading-snug text-ink-muted transition hover:border-primary/50 hover:bg-primary/[0.04] hover:text-ink"
+                onClick={() => {
+                  setPrompt(example);
+                  read(example);
+                }}
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {/*
           Reading happens as you type, free and instantly. This is only for
@@ -274,12 +315,26 @@ export function AiConceptTab() {
         </div>
       </div>
 
+      {/*
+        What room this is being planned for.
+
+        It was a loose sentence floating between two cards. It is the single
+        most consequential input to everything below — a brief for 500 guests
+        produces a completely different plan in a 40 m hall and in a 12 m one —
+        so it reads as a stated fact with the figures pulled out, not as a
+        footnote.
+      */}
       {venue ? (
-        <p className="px-1 text-[11px] leading-snug text-ink-muted">
-          Planning for the room already here — {(venue.widthMm / 1000).toFixed(1)} ×{' '}
-          {(venue.depthMm / 1000).toFixed(1)} m
-          {venue.heightMm ? `, ${(venue.heightMm / 1000).toFixed(1)} m to the ceiling` : ''}.
-        </p>
+        <div className="flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/[0.05] px-3 py-2">
+          <Building2 className="h-3.5 w-3.5 shrink-0 text-primary" />
+          <p className="min-w-0 flex-1 text-[11px] leading-snug text-ink">
+            <span className="font-semibold">Planning for the room already here</span>
+            <span className="block tabular-nums text-ink-muted">
+              {(venue.widthMm / 1000).toFixed(1)} × {(venue.depthMm / 1000).toFixed(1)} m
+              {venue.heightMm ? ` · ${(venue.heightMm / 1000).toFixed(1)} m to the ceiling` : ''}
+            </span>
+          </p>
+        </div>
       ) : null}
 
       {concept ? (
@@ -319,9 +374,34 @@ export function AiConceptTab() {
               </div>
             ) : null}
 
-            <div className="ai-hint mt-3">
-              {concept.elements.length} elements planned. Building puts every one in the room as its own
-              object — move it, resize it, delete it, nothing is locked.
+            {/*
+              What is actually going to arrive, counted by kind.
+
+              "27 elements planned" is a number nobody can check. A designer
+              reading a proposal needs to know it is 24 round tables and a
+              stage and two screens — that is the line that catches "it has not
+              understood that this is a dinner" *before* the plan is rewritten,
+              which is the only moment the catch is cheap.
+            */}
+            <div className="mt-3 rounded-xl border border-line bg-surface-muted/50 p-2.5">
+              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-ink-subtle">
+                What it will place
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {plannedCounts.map(([kind, count]) => (
+                  <span
+                    key={kind}
+                    className="inline-flex items-center gap-1 rounded-md border border-line bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-ink"
+                  >
+                    <span className="tabular-nums text-primary">{count}</span>
+                    <span className="font-medium text-ink-muted">{kind}</span>
+                  </span>
+                ))}
+              </div>
+              <p className="mt-2 text-[10px] leading-snug text-ink-subtle">
+                Every one arrives as its own object — move it, resize it, delete it. Nothing is locked, and
+                one undo removes the lot.
+              </p>
             </div>
 
             <button

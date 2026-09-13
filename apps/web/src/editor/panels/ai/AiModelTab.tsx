@@ -57,6 +57,7 @@ export function AiModelTab() {
   const cacheItems = useEditor((s) => s.cacheItems);
   const readOnly = useEditor((s) => s.readOnly);
   const planId = useEditor((s) => s.planId);
+  const setAiTab = useEditor((s) => s.setAiTab);
 
   const [prompt, setPrompt] = useState('');
   const [running, setRunning] = useState(false);
@@ -110,7 +111,16 @@ export function AiModelTab() {
         },
         ...prev,
       ]);
-      toast('success', 'Made. Set its height, then place it in the room.');
+      /*
+       * Say where it went, as well as that it worked.
+       *
+       * The grid below is this component's own state and does not survive a
+       * reload or a tab switch; the Assets tab is the durable record, and it is
+       * where the height can be set and the model placed in the room. Somebody
+       * who generates three models and comes back tomorrow should find them,
+       * and the only way they will is if they are told once where to look.
+       */
+      toast('success', 'Made. Set its height and place it — here, or on the Assets tab any time.');
     } catch (error) {
       toast('error', error instanceof Error ? error.message : 'That did not generate.');
     } finally {
@@ -135,13 +145,18 @@ export function AiModelTab() {
 
     cacheItems([dto]);
     setPendingItem(dto);
-    toast('success', `${item.name} is ready — click the floor to place it.`);
+    toast('success', `${item.name} is ready — click the floor to place it. Hold Shift to place several.`);
   };
 
   return (
     <div className="space-y-3">
       <div className="ai-card">
-        <h3 className="ai-card-title">AI 3D Generator</h3>
+        <div className="ai-card-head">
+          <span className="ai-card-icon">
+            <Boxes className="h-4 w-4" />
+          </span>
+          <h3 className="ai-card-title">AI 3D Generator</h3>
+        </div>
         <p className="ai-card-note">Turn your ideas into 3D models, ready to use in your scene.</p>
 
         <p className="mt-3 text-[11px] font-semibold text-ink-muted">
@@ -165,14 +180,24 @@ export function AiModelTab() {
       </div>
 
       <div>
-        <h3 className="mb-2 px-1 text-[13px] font-bold text-ink">Generated Models</h3>
+        <div className="mb-2 flex items-baseline justify-between gap-2 px-1">
+          <h3 className="text-[13px] font-bold text-ink">Made this session</h3>
+          <button
+            type="button"
+            className="text-[10px] font-semibold text-primary transition hover:underline"
+            onClick={() => setAiTab('assets')}
+          >
+            All generated assets →
+          </button>
+        </div>
 
         {made.length === 0 ? (
           <div className="ai-card flex flex-col items-center py-8 text-center">
             <Boxes className="h-6 w-6 text-ink-subtle" />
             <p className="mt-2 text-[12px] font-semibold text-ink">Nothing made yet</p>
             <p className="mt-0.5 max-w-[220px] text-[11px] leading-relaxed text-ink-muted">
-              Describe something that is not in your catalogue, and it will appear here ready to place.
+              Describe something that is not in your catalogue, and it will appear here ready to place — and
+              stay on the Assets tab afterwards.
             </p>
           </div>
         ) : (

@@ -36,6 +36,14 @@ import {
   type LightFixtureSceneObject,
   type ConstraintSceneObject,
   type Vec3,
+  activeFloor as activeSiteFloor,
+  boundsCentreMm,
+  boundsWidthMm,
+  boundsDepthMm,
+  clampToBounds,
+  expandBounds,
+  withinBounds,
+  type SiteBoundsMm,
 } from '@novira/shared';
 import { useEditor } from './editorStore';
 import { ModelBoundary, useModelReachable } from './ModelBoundary';
@@ -63,11 +71,13 @@ import { Constraint3D, ConstraintDrawPreview } from './Constraint3D';
 import { WalkthroughCamera } from './WalkthroughCamera';
 import { isSoftwareRenderer, useRendererProfile } from './rendererProfile';
 import { applyFinishes, clearFinishes } from './finishRenderer';
-import { registerPicking } from './picking';
+import { registerPicking, surfaceHeightAt } from './picking';
 import { StudioStage3D, ToneMapping } from './StudioStage3D';
 import { DropPreview } from './DropPreview';
 import { InstancedCatalog, useInstancedBatches } from './InstancedCatalog';
 import { beginFloorDrag, registerFloorDrag, useFloorDrag } from './useFloorDrag';
+import { useFrameBudget } from './useFrameBudget';
+import { PlacementHud, PlacementEcho } from './PlacementHud';
 
 const DEG = Math.PI / 180;
 
@@ -213,26 +223,42 @@ function LoadedModel({
   }, [instance, selected, object.opacity, needsOwnMaterial]);
 
   /*
-   * A building, once it is actually here, gets the camera pulled back to it.
+   * A building, once it is actually here, tells the plan how big it really is
+   * and then gets the camera brought into it.
    *
    * Opening a plan set in the Almasi Ballroom put the camera nine metres from
    * the origin — which is *inside* a room fifty-one metres across, facing a
    * blank white wall. The plan had loaded perfectly and looked broken.
    *
    * It has to happen here rather than when the venue is applied, because the
-   * bounds are only real once the glTF has been fetched and built; framing
-   * before that measures four constraint markers and nothing else. Suspense
-   * guarantees this effect runs after the geometry exists.
+   * geometry is only real once the glTF has been fetched and built; measuring
+   * before that finds four constraint markers and nothing else. Suspense
+   * guarantees this effect runs after the meshes exist.
    *
-   * Only for venue shells, and only when the designer has not already moved
-   * the camera — moving someone's view out from under them is worse than an
-   * awkward first frame.
+   * The measurement matters as much as the framing. A venue record describes
+   * a room; the file it points at is very often a whole building, or a
+   * building and the block it stands on. Comparing the two is the only way to
+   * know which — and that answer is what decides whether "show me the venue"
+   * should frame the recorded interior or simply fit what is there.
    */
   const isVenueShell = Boolean(object.venueId);
   useEffect(() => {
     if (!isVenueShell) return;
+
+    const box = new THREE.Box3().setFromObject(instance);
+    if (!box.isEmpty() && Number.isFinite(box.min.x)) {
+      useEditor.getState().measureVenueModel({
+        minX: Math.round(worldToMm(box.min.x)),
+        maxX: Math.round(worldToMm(box.max.x)),
+        minZ: Math.round(worldToMm(box.min.z)),
+        maxZ: Math.round(worldToMm(box.max.z)),
+      });
+    }
+
+    // Moving someone's view out from under them is worse than an awkward
+    // first frame, so a camera they have already touched is left alone.
     if (useEditor.getState().cameraTouched) return;
-    useEditor.getState().requestFrameAll();
+    useEditor.getState().requestFrameVenue();
   }, [isVenueShell, instance]);
 
   return <primitive object={instance} />;
@@ -822,6 +848,30 @@ function Ground() {
         x = Math.round(x / gridSizeMm) * gridSizeMm;
         z = Math.round(z / gridSizeMm) * gridSizeMm;
       }
+
+      /*
+       * The height it lands at, which is not zero once there is a building.
+       *
+       * The click reports a point on the ground *plane*, and the ground plane
+       * is the floor of an empty plan and nothing else. In a venue whose
+       * ground floor sits four metres above the model origin — which is most
+       * imported buildings — placing at y = 0 buries the chair in the slab,
+       * and the designer sees the object vanish and concludes the click did
+       * not register.
+       *
+       * `surfaceHeightAt` answers the real question: what is directly under
+       * this spot, and how high is its top face. A stage, a riser and a
+       * mezzanine all work out of the same call, so a chair clicked onto a
+       * platform stands on it rather than inside it.
+       *
+       * The search starts a little above the storey being worked on rather
+       * than from the sky, for the reason set out in `picking.ts`: a ray
+       * dropped from above a hotel finds its roof.
+       */
+      const site = useEditor.getState().venueSite;
+      const floorYMm = site ? activeSiteFloor(site).elevationMm : 0;
+      const y = Math.max(0, surfaceHeightAt(x, z, undefined, floorYMm + 2_500));
+
       const object: CatalogSceneObject = {
         id: crypto.randomUUID(),
         type: 'catalog',
@@ -837,12 +887,24 @@ function Ground() {
         // trip back to the catalogue.
         seatsDefault: pendingItem.seatsDefault ?? null,
         tableShape: pendingItem.tableShape ?? null,
-        positionMm: { x, y: 0, z },
+        positionMm: { x, y, z },
         rotationDeg: { x: 0, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
       };
       addObjects([object]);
-      setPendingItem(null);
+      useEditor.getState().notePlaced(object.name ?? pendingItem.name);
+
+      /*
+       * The cursor stays armed while Shift is held.
+       *
+       * Laying out a room is a repetitive act — twelve cocktail tables, one
+       * after another — and disarming after every single placement means
+       * returning to the catalogue and clicking the same item twelve times.
+       * Shift is the modifier every drawing tool uses for "and again", and it
+       * costs nothing to anyone who does not know about it, because letting go
+       * of a key you were not pressing behaves exactly as before.
+       */
+      if (!event.shiftKey) setPendingItem(null);
     },
     [
       wallDrawing, wallDraft, toPlanPoint, addWallPoint, finishWallRun,
@@ -1009,19 +1071,26 @@ function SelectionGizmo({ orbitRef }: { orbitRef: React.MutableRefObject<any> })
         }}
         onMouseUp={() => {
           if (orbitRef.current) orbitRef.current.enabled = true;
+
           /*
            * Write the gizmo's result back into the document in millimetres.
            *
-           * Y is floored at zero: the grid is the ground, and nothing in a
-           * real room is buried in the slab. Without this the move gizmo will
-           * happily drag a table down through the floor, where it is both
-           * invisible and still counted in the schedule.
+           * The floor is the storey being worked on, not y = 0. On a plan set
+           * in a building whose ground floor sits four metres above the model
+           * origin — which is most imported venues — clamping to zero drops
+           * whatever was just moved through the slab and into the foundations,
+           * so a nudge of 40 mm sideways teleported the object a storey down.
+           * That is the "unnecessary motion when I finish moving something"
+           * at its most literal.
            */
-          updateObject(object.id, {
+          const site = useEditor.getState().venueSite;
+          const floorMm = site ? activeSiteFloor(site).elevationMm : 0;
+
+          const next = {
             positionMm: {
-              x: worldToMm(node.position.x),
-              y: Math.max(0, worldToMm(node.position.y)),
-              z: worldToMm(node.position.z),
+              x: Math.round(worldToMm(node.position.x)),
+              y: Math.max(floorMm, Math.round(worldToMm(node.position.y))),
+              z: Math.round(worldToMm(node.position.z)),
             },
             rotationDeg: {
               x: Math.round(node.rotation.x / DEG),
@@ -1029,7 +1098,36 @@ function SelectionGizmo({ orbitRef }: { orbitRef: React.MutableRefObject<any> })
               z: Math.round(node.rotation.z / DEG),
             },
             scale: { x: node.scale.x, y: node.scale.y, z: node.scale.z },
-          } as Partial<SceneObject>);
+          };
+
+          /*
+           * Put the node exactly where the document now says it is, before
+           * React does.
+           *
+           * The gizmo has been moving the three.js node directly for the whole
+           * drag, at full float precision; the document stores whole
+           * millimetres. So the value written back is *not* the value the node
+           * is sitting at, and the next render corrects the node — which the
+           * user sees as the object twitching the instant they let go. It is
+           * small, it is on every single transform, and it is exactly the kind
+           * of thing that makes a viewport feel imprecise.
+           *
+           * Applying the rounded result here means the node is already correct
+           * when the render arrives, so there is nothing left to jump.
+           */
+          node.position.set(
+            mmToWorld(next.positionMm.x),
+            mmToWorld(next.positionMm.y),
+            mmToWorld(next.positionMm.z)
+          );
+          node.rotation.set(
+            next.rotationDeg.x * DEG,
+            next.rotationDeg.y * DEG,
+            next.rotationDeg.z * DEG
+          );
+
+          updateObject(object.id, next as Partial<SceneObject>);
+          invalidate();
         }}
       />
     </>
@@ -1096,6 +1194,12 @@ function RotationReadout({ object, node }: { object: SceneObject; node: THREE.Ob
 function FrameKeepAlive() {
   const gl = useThree((s) => s.gl);
 
+  /*
+   * The budget is measured here, at the one place that already owns the
+   * question of how often to draw.
+   */
+  useFrameBudget();
+
   useEffect(() => {
     const canvas = gl.domElement;
     let until = 0;
@@ -1110,8 +1214,24 @@ function FrameKeepAlive() {
       raf = requestAnimationFrame(pump);
     };
 
+    /*
+     * How long a pointer gesture keeps asking for frames.
+     *
+     * A full second is right when a frame costs eight milliseconds: it covers
+     * the damping tail and an editor left alone really does go quiet. On a
+     * scene where a frame costs four hundred milliseconds it is a trap — a
+     * second of frames is requested for every pointer move, none of them ever
+     * catch up, and the main thread is saturated for as long as the mouse is
+     * moving, which is when clicks stop landing altogether.
+     *
+     * So the window is shortened when frames are expensive. Damping still
+     * finishes, because the controls request their own frames while they are
+     * easing; what is dropped is the speculative tail that was only ever there
+     * in case something else needed it.
+     */
     const wake = () => {
-      until = performance.now() + 1000;
+      const expensive = useEditor.getState().frameBudget.heavy;
+      until = performance.now() + (expensive ? 320 : 1000);
       if (!raf) raf = requestAnimationFrame(pump);
     };
 
@@ -1138,6 +1258,41 @@ function FrameKeepAlive() {
  * `preserveDrawingBuffer` would cost memory on every frame; this costs nothing
  * until someone actually exports.
  */
+/**
+ * Render at a lower resolution while the view is being moved, on a scene that
+ * cannot afford full resolution.
+ *
+ * Fragments are the other half of the cost, and unlike draw calls they scale
+ * exactly with the pixel count — three-quarter resolution is forty-four per
+ * cent fewer of them. In motion the difference is very close to invisible,
+ * because everything on screen is already moving; standing still it would be
+ * obvious, which is why it is only ever applied while a gesture is in progress
+ * and is restored on the frame the gesture ends.
+ *
+ * Written straight to the renderer rather than through the `<Canvas dpr>` prop:
+ * changing that prop remounts nothing but does go through React, and this has
+ * to happen on the same frame as the gesture rather than a render later.
+ */
+function AdaptiveResolution() {
+  const gl = useThree((s) => s.gl);
+  const budget = useEditorShallow((s) => s.frameBudget);
+  const full = useRef(0);
+
+  useEffect(() => {
+    // The ratio the canvas was set up with, captured once so restoring it is
+    // exact rather than a guess at what the device reports.
+    if (!full.current) full.current = gl.getPixelRatio();
+    const reduced = budget.moving && budget.heavy;
+    const wanted = reduced ? Math.max(0.75, full.current * 0.75) : full.current;
+    if (Math.abs(gl.getPixelRatio() - wanted) > 0.01) {
+      gl.setPixelRatio(wanted);
+      invalidate();
+    }
+  }, [gl, budget.moving, budget.heavy]);
+
+  return null;
+}
+
 function CaptureBridge() {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
@@ -1337,20 +1492,99 @@ function CameraReader({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
   return null;
 }
 
+/**
+ * Switching between the plan view and the perspective view.
+ *
+ * ## The motion this removes
+ *
+ * It used to write the camera to a fixed position — `(0, 26, 0)` looking down,
+ * or `(10, 8, 10)` looking at the origin — and set the orbit target to the
+ * origin, on every press of Plan or 3D.
+ *
+ * That is a teleport, and it is the most jarring one in the editor because it
+ * is triggered by a button people press constantly. Working on the top table at
+ * the far end of a 52 m ballroom, tapping Plan to check a gangway, and arriving
+ * nine metres from the world origin — looking at a patch of empty floor at the
+ * other end of the room — is exactly the "unnecessary motion when I finish a
+ * task" this viewport was full of. Worse, the fixed height meant the plan view
+ * was framed for a small room: at 26 m up, a hall this size does not fit, so
+ * the button that exists to show the whole floor showed a third of it.
+ *
+ * ## What it does instead
+ *
+ * It **keeps what you were looking at** and changes only the angle you are
+ * looking at it from. The orbit target does not move at all, so the thing in
+ * the middle of the screen before the press is the thing in the middle of the
+ * screen after it. The distance is preserved too, and only clamped to keep a
+ * top view high enough to actually look down.
+ *
+ * The camera is moved through the same flight the framing requests use, so
+ * pressing Plan is a swing up and over rather than a cut — which is what makes
+ * it legible as *the same room from above* rather than as a new place.
+ */
 function CameraRig({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
   const cameraMode = useEditor((s) => s.cameraMode);
   const { camera } = useThree();
+  /*
+   * The first run is the plan opening, not somebody pressing a button.
+   *
+   * `CameraRestore` puts the camera where this plan was last left, and it must
+   * win — re-aiming on mount would throw that away and land every plan on the
+   * same generic view, which is the bug this used to have.
+   */
+  const mounted = useRef(false);
 
   useEffect(() => {
-    if (cameraMode === 'top') {
-      camera.position.set(0, 26, 0.001);
-      camera.lookAt(0, 0, 0);
-    } else {
-      camera.position.set(10, 8, 10);
-      camera.lookAt(0, 0, 0);
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
     }
-    orbitRef.current?.target.set(0, 0, 0);
-    orbitRef.current?.update();
+
+    const controls = orbitRef.current;
+    if (!controls) return;
+
+    /*
+     * Turn about what is already on screen.
+     *
+     * The target is deliberately untouched: it is what the view is *of*, and
+     * changing how you are looking at something is not a reason to look at
+     * something else.
+     */
+    const target = controls.target as THREE.Vector3;
+    const offset = camera.position.clone().sub(target);
+    const distance = Math.max(2, offset.length());
+
+    if (cameraMode === 'top') {
+      // Straight down, from far enough up that the same extent is in frame as
+      // was in frame from the three-quarter view — a plan view that shows less
+      // than the view it replaced is not a plan view.
+      camera.position.copy(target).add(new THREE.Vector3(0, distance, 0.001));
+    } else {
+      /*
+       * Back to three-quarters, keeping the compass bearing.
+       *
+       * The azimuth is taken from where the camera already is so the room does
+       * not spin: leaving the plan view puts you back over the same corner you
+       * were over, at a normal working elevation rather than overhead.
+       */
+      const bearing = Math.atan2(offset.x, offset.z) || Math.PI / 4;
+      const elevation = 0.62; // radians from the horizon — the hero angle
+      camera.position.copy(target).add(
+        new THREE.Vector3(
+          Math.sin(bearing) * Math.cos(elevation) * distance,
+          Math.sin(elevation) * distance,
+          Math.cos(bearing) * Math.cos(elevation) * distance
+        )
+      );
+    }
+
+    // The floor is solid, here as everywhere.
+    camera.position.y = Math.max(camera.position.y, target.y + EYE_FLOOR_M);
+    controls.update();
+    invalidate();
+
+    const cam = currentCamera();
+    if (cam) useEditor.getState().setCameraPose(cam);
   }, [cameraMode, camera, orbitRef]);
 
   return null;
@@ -1473,27 +1707,171 @@ const EYE_FLOOR_M = 0.05;
 /** The orbit target may sit on the floor but never beneath it. */
 const TARGET_FLOOR_M = 0;
 
+/**
+ * How far outside the room the camera may still be pulled, in millimetres.
+ *
+ * Not zero. Pinning the eye exactly to the wall line means a camera at the
+ * back of a hall has its nose against the plaster and can see almost nothing;
+ * a couple of metres of slack lets somebody stand back far enough to take in
+ * the end wall, while still keeping them recognisably inside the building.
+ */
+const SITE_EYE_SLACK_MM = 2500;
+
+/**
+ * And how far the orbit target may stray.
+ *
+ * Much tighter than the eye, because the target is what the view *pivots
+ * about*, and a pivot outside the room is what makes a drag inside it swing
+ * the whole building past the screen. Keeping the pivot on the floor plan is
+ * most of what makes orbiting in a venue feel like turning around in a room
+ * rather than being swung on a rope.
+ */
+const SITE_TARGET_SLACK_MM = 600;
+
+
 function GroundClamp({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
   const { camera } = useThree();
 
   useFrame(() => {
     let corrected = false;
+    const state = useEditor.getState();
 
-    if (camera.position.y < EYE_FLOOR_M) {
-      camera.position.y = EYE_FLOOR_M;
+    /*
+     * The storey being worked on is the floor, not y = 0.
+     *
+     * On a plan set in a real building the ground floor is often several
+     * metres above the model origin and a mezzanine is higher still. Clamping
+     * to zero there lets the camera sink through the slab somebody is
+     * designing on and look up at their event through the floor, which reads
+     * as a rendering fault rather than as a view.
+     */
+    const site = state.venueSite;
+    const floor = site ? activeSiteFloor(site) : null;
+    const floorY = floor ? mmToWorld(floor.elevationMm) : 0;
+    const eyeFloor = floorY + EYE_FLOOR_M;
+    const targetFloor = floorY + TARGET_FLOOR_M;
+
+    if (camera.position.y < eyeFloor) {
+      camera.position.y = eyeFloor;
       corrected = true;
     }
 
     const controls = orbitRef.current;
-    if (controls?.target && controls.target.y < TARGET_FLOOR_M) {
-      controls.target.y = TARGET_FLOOR_M;
+    if (controls?.target && controls.target.y < targetFloor) {
+      controls.target.y = targetFloor;
       corrected = true;
+    }
+
+    /*
+     * Inside the room, when there is a room and the designer wants to stay in
+     * it.
+     *
+     * Two separate clamps rather than one, because the eye and the pivot fail
+     * differently. A camera that drifts outside the walls is looking at the
+     * back of them; a *pivot* that drifts outside is the reason a plain orbit
+     * drag in a large venue sends the whole building sliding across the screen
+     * instead of turning the view. The pivot is held much more tightly for
+     * exactly that reason.
+     *
+     * Skipped entirely while flying or walking: those are the two gestures
+     * whose whole purpose may be to leave — walking out of a marquee to look
+     * back at it is a legitimate thing to do, and a wall the camera cannot
+     * pass through during a deliberate walk is a cage.
+     */
+    if (site && state.confineToVenue && !state.flying && !state.walkMode && controls?.target) {
+      const bounds = floor ? floor.boundsMm : site.interiorMm;
+
+      /*
+       * How far outside the walls the eye may go, sized to the room.
+       *
+       * A fixed two and a half metres is right for a square hall and quite
+       * wrong for a long one. The Johari Rotana is 51 m across and 16 m deep:
+       * fitting its full width in frame needs the camera about forty metres
+       * back, which is twenty-four metres outside a room only sixteen deep.
+       * That is not a mistake — it is the vantage every architectural render
+       * of a long, shallow room is taken from, and the alternative is a view
+       * that can never contain the room it is confined to.
+       *
+       * So the allowance on each axis is the *other* axis's extent: a room
+       * that is long in X may be viewed from far out in Z, and vice versa,
+       * which is exactly the room it takes to see the long dimension. A square
+       * room gets a symmetric and modest allowance out of the same rule, which
+       * is why it is one rule rather than a special case.
+       *
+       * Confinement still does its real job. The camera cannot wander off down
+       * the street, it cannot get behind the building, and — the part that
+       * actually makes navigation feel like a room — the *pivot* stays on the
+       * floor plan, held far more tightly a few lines below.
+       */
+      const spanX = boundsWidthMm(bounds);
+      const spanZ = boundsDepthMm(bounds);
+      const eyeLimit = {
+        minX: bounds.minX - Math.max(SITE_EYE_SLACK_MM, spanZ),
+        maxX: bounds.maxX + Math.max(SITE_EYE_SLACK_MM, spanZ),
+        minZ: bounds.minZ - Math.max(SITE_EYE_SLACK_MM, spanX),
+        maxZ: bounds.maxZ + Math.max(SITE_EYE_SLACK_MM, spanX),
+      };
+      const eyeX = mmToWorld(eyeLimit.minX);
+      const eyeMaxX = mmToWorld(eyeLimit.maxX);
+      const eyeZ = mmToWorld(eyeLimit.minZ);
+      const eyeMaxZ = mmToWorld(eyeLimit.maxZ);
+      if (camera.position.x < eyeX || camera.position.x > eyeMaxX) {
+        camera.position.x = THREE.MathUtils.clamp(camera.position.x, eyeX, eyeMaxX);
+        corrected = true;
+      }
+      if (camera.position.z < eyeZ || camera.position.z > eyeMaxZ) {
+        camera.position.z = THREE.MathUtils.clamp(camera.position.z, eyeZ, eyeMaxZ);
+        corrected = true;
+      }
+
+      /*
+       * A ceiling as well as a floor.
+       *
+       * Without it, zooming out inside a ballroom lifts the eye through the
+       * roof and the plan is suddenly being viewed from above a building whose
+       * ceiling is opaque — so the event vanishes and it looks as though
+       * something broke. Generous: high enough to take the whole room in, low
+       * enough to stay under the structure.
+       */
+      /*
+       * A ceiling, but only over the room.
+       *
+       * Inside the walls, rising through the roof is what makes the event
+       * vanish behind opaque structure — so the clear height is the limit, and
+       * the view stays under it. *Outside* the walls there is nothing to see
+       * through and the height is simply how far back the camera had to go to
+       * take the room in, which for a long hall is a good way up. Applying the
+       * indoor ceiling out there would flatten every framing of a large room
+       * into a view from knee height.
+       */
+      const inside = withinBounds(bounds, worldToMm(camera.position.x), worldToMm(camera.position.z));
+      const headroom = floor?.clearHeightMm ? mmToWorld(floor.clearHeightMm) : 0;
+      const ceiling = inside
+        ? floorY + (headroom > 2 ? headroom * 0.95 : 24)
+        : floorY + Math.max(24, mmToWorld(Math.max(spanX, spanZ)));
+      if (camera.position.y > ceiling) {
+        camera.position.y = ceiling;
+        corrected = true;
+      }
+
+      const pivot = clampToBounds(
+        expandBounds(bounds, SITE_TARGET_SLACK_MM),
+        worldToMm(controls.target.x),
+        worldToMm(controls.target.z)
+      );
+      const pivotX = mmToWorld(pivot.xMm);
+      const pivotZ = mmToWorld(pivot.zMm);
+      if (Math.abs(controls.target.x - pivotX) > 1e-4 || Math.abs(controls.target.z - pivotZ) > 1e-4) {
+        controls.target.x = pivotX;
+        controls.target.z = pivotZ;
+        corrected = true;
+      }
     }
 
     if (corrected) {
       // `update()` re-derives the spherical coordinates from the corrected
       // positions; without it the controls keep their own stale idea of where
-      // the camera is and snap it back below ground on the next input.
+      // the camera is and snap it back out of bounds on the next input.
       controls?.update?.();
       invalidate();
     }
@@ -2240,7 +2618,20 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
    * shadows and 57 without. See `rendererProfile.ts`.
    */
   const profile = useRendererProfile();
-  const shadowsWanted = lighting.shadowsEnabled && profile.shadowMapSize > 0;
+  /*
+   * Shadows, when there is frame time for them.
+   *
+   * A shadow-casting light redraws the whole scene into a depth map, so it is
+   * very close to a doubling of the frame — and on a plan heavy enough to be
+   * struggling, it is the difference between a view that turns and one that
+   * does not. Dropped only while the camera is actually moving, and only when
+   * frames have been measured as expensive, so the still picture nobody would
+   * accept without shadows always has them: the frame after the gesture ends
+   * is drawn in full, and so is every export and every screenshot.
+   */
+  const budget = useEditorShallow((s) => s.frameBudget);
+  const shadowsAffordable = !(budget.moving && budget.heavy);
+  const shadowsWanted = lighting.shadowsEnabled && profile.shadowMapSize > 0 && shadowsAffordable;
 
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
   // Which objects the instanced renderer has taken responsibility for.
@@ -2278,6 +2669,7 @@ function SceneContents({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) 
       <CameraRestore orbitRef={orbitRef} />
       <CaptureBridge />
       <FrameKeepAlive />
+      <AdaptiveResolution />
       <FloorDragBridge orbitRef={orbitRef} />
       <ViewFlight orbitRef={orbitRef} />
       <CameraReader orbitRef={orbitRef} />
@@ -2497,7 +2889,6 @@ function LedQuickEditor() {
 
 export function Viewport() {
   const orbitRef = useRef<any>(null);
-  const pendingItem = useEditor((s) => s.pendingItem);
   const softwareRenderer = isSoftwareRenderer();
   // A walkthrough is animation: it needs every frame. Everything else does not.
   const playing = useEditor((s) => s.playing);
@@ -2505,9 +2896,10 @@ export function Viewport() {
   return (
     <div className="relative h-full w-full bg-canvas [&>div>canvas]:!outline-none">
       {/*
-        Outside the Canvas on purpose: a fixed pill at the top of the viewport
-        rather than a bar that follows the selection around and covers what is
-        behind it.
+        Outside the Canvas on purpose: these are HTML, and they have to be able
+        to sit over the plan and be clicked. The transform modes keep their
+        fixed corner; the selection strip places itself beside whatever is
+        selected without covering it — see `SelectionToolbar`.
       */}
       <TransformRail />
       <SelectionToolbar />
@@ -2538,7 +2930,15 @@ export function Viewport() {
          */
         frameloop={playing ? 'always' : 'demand'}
         gl={{ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true }}
-        camera={{ fov: 50, near: 0.1, far: 800, position: [10, 8, 10] }}
+        /*
+         * The very first frame, before anything has been restored.
+         *
+         * Matched to `DEFAULT_CAMERA` on purpose: this position is used for the
+         * one frame between the Canvas mounting and `CameraRestore` running, and
+         * when the two disagreed that frame was a visible jolt from a low
+         * horizon view up into the proper one. Same numbers, no jolt.
+         */
+        camera={{ fov: 50, near: 0.1, far: 800, position: [13, 13, 18] }}
       >
         <Suspense
           fallback={
@@ -2551,13 +2951,12 @@ export function Viewport() {
         </Suspense>
       </Canvas>
 
-      {pendingItem ? (
-        <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
-          <div className="pointer-events-auto rounded-full border border-primary/40 bg-primary/15 px-4 py-1.5 text-xs font-medium text-primary backdrop-blur">
-            Click the floor to place <strong className="font-semibold">{pendingItem.name}</strong> — Esc to cancel
-          </div>
-        </div>
-      ) : null}
+      {/*
+        What is about to be placed, where it will land, and at what size —
+        rather than a line of text saying to click. See `PlacementHud`.
+      */}
+      <PlacementHud />
+      <PlacementEcho />
       <NavHint />
       <BoxSelectOverlay />
     </div>
@@ -2760,86 +3159,306 @@ function Collaborators() {
 const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
 /**
- * Pull the camera back to take in the whole plan.
+ * Taking the camera somewhere, without throwing the user across the room.
  *
- * Adding a venue is the case that made this necessary: a generated ballroom
- * is twenty-odd metres across and arrives centred on the origin, so the
- * camera ends up inside a wall and it looks as though nothing happened.
+ * Every "show me this" in the editor ends up here: Fit, F on a selection,
+ * double-clicking an object, arriving at a venue, changing storey. They used
+ * to *cut* — the camera was simply written to its new position on the frame
+ * the request landed. That is the single largest source of the jarring motion
+ * in this viewport, and it is worst exactly when it matters most: someone who
+ * has just finished placing a chair presses F, the world teleports, and they
+ * have to find the room they were standing in all over again.
  *
- * The bounds are measured from the rendered scene rather than the document,
- * so a model that turned out larger than its declared size is still framed
- * correctly.
+ * So the move is flown rather than cut, over a distance-aware duration, with
+ * the same easing the saved-view flight uses. Three rules keep it from
+ * becoming the *other* kind of annoying:
+ *
+ *  · **A move that changes almost nothing is not made at all.** Framing a
+ *    selection you are already looking at used to nudge the camera a few
+ *    centimetres and stop, which reads as a twitch with no cause. Below the
+ *    thresholds here the request is simply already satisfied.
+ *  · **The flight is interruptible.** Any pointer input during it hands the
+ *    camera straight back — a flight you cannot escape is worse than a cut.
+ *  · **Short moves are quick.** The duration scales with how far the camera
+ *    actually travels, so stepping to the next chair takes a fifth of a
+ *    second and crossing a hall takes most of one.
  */
+
+/** Below this, in metres, a reframe is not worth moving the camera for. */
+const FRAME_SETTLED_M = 0.35;
+/** Below this fraction of the viewing distance, likewise. */
+const FRAME_SETTLED_RATIO = 0.06;
+const FRAME_MIN_MS = 220;
+const FRAME_MAX_MS = 900;
+
 function FrameAll({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
   const frameRequest = useEditor((s) => s.frameRequest);
-  const { scene, camera } = useThree();
+  const { scene, camera, gl } = useThree();
   const pending = useRef(0);
+
+  /** The flight in progress, if any. */
+  const flight = useRef<{
+    fromPos: THREE.Vector3;
+    toPos: THREE.Vector3;
+    fromTarget: THREE.Vector3;
+    toTarget: THREE.Vector3;
+    start: number;
+    duration: number;
+  } | null>(null);
 
   useEffect(() => {
     pending.current = frameRequest;
   }, [frameRequest]);
 
   /*
-   * Done on a frame tick rather than in an effect.
-   *
-   * OrbitControls keeps its own spherical position and writes it back to the
-   * camera on every update, so moving the camera from an effect is undone on
-   * the next frame — which is why the camera appeared not to move at all.
-   * Setting the target first and then calling `update()` from inside the loop
-   * makes the controls adopt the new position as their own.
+   * Touching the canvas cancels the flight, leaving the camera wherever it
+   * had reached. Registered on the canvas rather than the window so a click in
+   * a side panel — which is very often what *triggered* the flight — does not
+   * cancel it the instant it begins.
    */
+  useEffect(() => {
+    const dom = gl.domElement;
+    const cancel = () => {
+      flight.current = null;
+    };
+    dom.addEventListener('pointerdown', cancel);
+    dom.addEventListener('wheel', cancel, { passive: true });
+    return () => {
+      dom.removeEventListener('pointerdown', cancel);
+      dom.removeEventListener('wheel', cancel);
+    };
+  }, [gl]);
+
   useFrame(() => {
+    /* ── A move already under way ──────────────────────────────────── */
+    const move = flight.current;
+    if (move) {
+      const controls = orbitRef.current;
+      const t = Math.min(1, (performance.now() - move.start) / move.duration);
+      // Ease in and out: the arrival is what has to be legible.
+      const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+      camera.position.lerpVectors(move.fromPos, move.toPos, eased);
+      if (controls?.target) {
+        controls.target.lerpVectors(move.fromTarget, move.toTarget, eased);
+        controls.update();
+      }
+
+      if (t >= 1) {
+        flight.current = null;
+        const cam = currentCamera();
+        if (cam) useEditor.getState().setCameraPose(cam);
+      } else {
+        invalidate();
+      }
+      // A fresh request arriving mid-flight replaces it below.
+      if (!pending.current) return;
+    }
+
     if (!pending.current) return;
     const controls = orbitRef.current;
     if (!controls) return;
     pending.current = 0;
 
     const state = useEditor.getState();
-    const wanted = state.frameMode === 'selection' ? new Set(state.selectedIds) : null;
-
-    const box = new THREE.Box3();
-    scene.traverse((node) => {
-      if (!(node instanceof THREE.Mesh)) return;
-      // Only placed content: the ground grid and the gizmos would blow the
-      // bounds out to something meaningless.
-      let owner: THREE.Object3D | null = node;
-      while (owner && !owner.userData?.objectId) owner = owner.parent;
-      if (!owner) return;
-      // Framing a selection measures only what is selected.
-      if (wanted && !wanted.has(String(owner.userData.objectId))) return;
-      box.expandByObject(node);
-    });
-    if (box.isEmpty()) return;
-
-    const size = box.getSize(new THREE.Vector3());
-    const centre = box.getCenter(new THREE.Vector3());
-    const radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
-
-    const perspective = camera as THREE.PerspectiveCamera;
-    const fov = ((perspective.fov ?? 50) * Math.PI) / 180;
-    // A little past the exact fit, so the subject is not jammed to the edges.
-    const distance = (radius / Math.sin(fov / 2)) * 1.4;
+    const destination = frameTarget(state, scene, camera as THREE.PerspectiveCamera, controls);
+    if (!destination) return;
 
     /*
-     * Framing everything picks the hero three-quarter angle; framing a
-     * selection keeps the angle you are already looking from. Snapping the
-     * view around every time somebody focuses a chair is disorienting — the
-     * request was "get closer to this", not "show me this from somewhere
-     * else".
+     * Already there.
+     *
+     * Both halves of the pose are checked, because either alone gives the
+     * wrong answer: a camera in the right place looking at the wrong point
+     * still has to turn, and one aimed correctly from twice the distance still
+     * has to travel.
      */
-    const keepAngle = wanted && camera.position.distanceTo(controls.target) > 0.001;
-    const direction = keepAngle
-      ? camera.position.clone().sub(controls.target).normalize()
-      : new THREE.Vector3(0.75, 0.6, 1).normalize();
+    const posDelta = camera.position.distanceTo(destination.position);
+    const targetDelta = controls.target.distanceTo(destination.target);
+    const span = Math.max(0.001, camera.position.distanceTo(controls.target));
+    const settled = Math.max(FRAME_SETTLED_M, span * FRAME_SETTLED_RATIO);
+    if (posDelta < settled && targetDelta < settled) return;
 
-    controls.target.copy(centre);
-    camera.position.copy(centre.clone().add(direction.multiplyScalar(distance)));
-    camera.updateProjectionMatrix();
-    controls.update();
-    // Remember where framing left the camera, like any other move.
-    const cam = currentCamera();
-    if (cam) useEditor.getState().setCameraPose(cam);
+    /*
+     * How long the flight takes, from how far it goes.
+     *
+     * Twelve metres of travel is about where a move stops reading as a step
+     * and starts reading as a journey, so that is where the duration reaches
+     * its ceiling.
+     */
+    const travel = Math.max(posDelta, targetDelta);
+    const duration = THREE.MathUtils.clamp(
+      FRAME_MIN_MS + (travel / 12) * (FRAME_MAX_MS - FRAME_MIN_MS),
+      FRAME_MIN_MS,
+      FRAME_MAX_MS
+    );
+
+    flight.current = {
+      fromPos: camera.position.clone(),
+      toPos: destination.position,
+      fromTarget: controls.target.clone(),
+      toTarget: destination.target,
+      start: performance.now(),
+      duration,
+    };
+    invalidate();
   });
 
   return null;
+}
+
+/**
+ * Where the camera should end up, for one framing request.
+ *
+ * Split out from the flight so the two questions stay separate: *what* should
+ * be on screen is a fact about the plan, and *how the camera gets there* is a
+ * fact about the gesture. Returns null when there is nothing to look at, which
+ * leaves the camera exactly where it is — the right answer for Fit on an empty
+ * plan, and much better than flying to the origin to stare at nothing.
+ */
+function frameTarget(
+  state: ReturnType<typeof useEditor.getState>,
+  scene: THREE.Scene,
+  camera: THREE.PerspectiveCamera,
+  controls: { target: THREE.Vector3 }
+): { position: THREE.Vector3; target: THREE.Vector3 } | null {
+  const mode = state.frameMode;
+  const site = state.venueSite;
+
+  /* ── The room itself ───────────────────────────────────────────────── */
+  /*
+   * Framed from the recorded interior rather than from the geometry.
+   *
+   * This is the whole point of knowing where the venue's walls are. A hotel
+   * glTF is mostly *not* the ballroom, and measuring its meshes — which is
+   * what framing everything does — puts the camera far enough out to take in
+   * the car park. The plan records the interior, so the room can be framed as
+   * a room: centred on the floor somebody is working on, at a height and a
+   * distance that reads as standing in it rather than flying over it.
+   */
+  if (mode === 'venue' && site) {
+    const floor = activeSiteFloor(site);
+    const bounds = floor.boundsMm;
+    const centre = boundsCentreMm(bounds);
+    const width = mmToWorld(boundsWidthMm(bounds));
+    const depth = mmToWorld(boundsDepthMm(bounds));
+    const elevation = mmToWorld(floor.elevationMm);
+
+    if (width > 0.5 && depth > 0.5) {
+      const focus = new THREE.Vector3(
+        mmToWorld(centre.xMm),
+        // Aimed a little above the floor, at roughly the height of what
+        // stands on it, so the room fills the frame rather than the slab.
+        elevation + Math.min(1.6, Math.max(0.6, Math.min(width, depth) * 0.04)),
+        mmToWorld(centre.zMm)
+      );
+
+      /*
+       * Far enough back to take the room in, and no further.
+       *
+       * Fitting the *diagonal* — which is what a bounding-sphere fit does —
+       * leaves a third of the frame empty on the short axis for no gain.
+       *
+       * The camera backs off the short side (see the direction below), so the
+       * room's long dimension is what has to fit the frame's **width** and its
+       * short dimension is what has to fit the frame's **height** once
+       * foreshortened by the viewing angle. Getting these two the wrong way
+       * round is what put the camera 28 m into a hall only 16 m deep.
+       */
+      const fov = (camera.fov * Math.PI) / 180;
+      const aspect = camera.aspect || 1.6;
+      const acrossFrame = Math.max(width, depth);
+      const intoFrame = Math.min(width, depth);
+      // Horizontal half-angle: the frame is wider than it is tall.
+      const halfAngleX = Math.atan(Math.tan(fov / 2) * aspect);
+      const byWidth = acrossFrame / 2 / Math.tan(halfAngleX);
+      const byHeight = intoFrame / 2 / Math.tan(fov / 2);
+      const distance = Math.max(byWidth, byHeight, 6) * 1.1;
+
+      /*
+       * Looking *across* the room from outside its short side.
+       *
+       * The instinct is to look down the long axis, as a photographer would.
+       * Measured against the Johari Rotana — 51 m wide and 16 m deep — that is
+       * wrong: standing at one end of a hall three times longer than it is
+       * deep puts the camera 28 m out along the length, inside the building,
+       * with the near wall filling two-thirds of the frame and the far end
+       * vanishing to a point. The room is unreadable and, worse, it looks like
+       * the view is broken rather than merely badly chosen.
+       *
+       * Backing off the *short* side instead means the long dimension runs
+       * left-to-right across the frame, which is the composition every venue
+       * floor plan and every ballroom photograph uses, and the one where the
+       * whole room is visible at once.
+       *
+       * The elevation is a little over half the stand-off distance rather than
+       * a fixed angle, which keeps a small meeting room from being viewed from
+       * its own ceiling and a large hall from being viewed from the street.
+       */
+      const wideOnX = width >= depth;
+      const direction = new THREE.Vector3(wideOnX ? 0.28 : 1, 0.52, wideOnX ? 1 : 0.28).normalize();
+      const position = focus.clone().add(direction.multiplyScalar(distance));
+
+      /*
+       * Never below the floor of the storey being framed, and never above its
+       * ceiling. A mezzanine framed from over the slab above it shows the slab.
+       */
+      const headroom = floor.clearHeightMm ? mmToWorld(floor.clearHeightMm) : Infinity;
+      position.y = Math.min(
+        Math.max(position.y, elevation + 1.2),
+        elevation + Math.max(3, headroom * 0.92)
+      );
+
+      return { position, target: focus };
+    }
+  }
+
+  /* ── A selection, or everything ────────────────────────────────────── */
+  const wanted = mode === 'selection' ? new Set(state.selectedIds) : null;
+
+  const box = new THREE.Box3();
+  scene.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) return;
+    // Only placed content: the ground grid and the gizmos would blow the
+    // bounds out to something meaningless.
+    let owner: THREE.Object3D | null = node;
+    while (owner && !owner.userData?.objectId) owner = owner.parent;
+    if (!owner) return;
+    const ownerId = String(owner.userData.objectId);
+    // Framing a selection measures only what is selected.
+    if (wanted && !wanted.has(ownerId)) return;
+    /*
+     * Framing "everything" leaves the building out when the plan knows it is
+     * one. The shell is by far the largest mesh in such a scene and it is not
+     * what anybody is designing — including it is what made Fit useless on a
+     * plan set in a real venue. The `venue` branch above frames the room
+     * properly; this keeps the fallback honest.
+     */
+    if (!wanted && site?.shellObjectId === ownerId) return;
+    box.expandByObject(node);
+  });
+  if (box.isEmpty()) return null;
+
+  const size = box.getSize(new THREE.Vector3());
+  const centre = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
+
+  const fov = (camera.fov * Math.PI) / 180;
+  // A little past the exact fit, so the subject is not jammed to the edges.
+  const distance = (radius / Math.sin(fov / 2)) * 1.4;
+
+  /*
+   * Framing everything picks the hero three-quarter angle; framing a
+   * selection keeps the angle you are already looking from. Swinging the view
+   * around every time somebody focuses a chair is disorienting — the request
+   * was "get closer to this", not "show me this from somewhere else".
+   */
+  const keepAngle = wanted && camera.position.distanceTo(controls.target) > 0.001;
+  const direction = keepAngle
+    ? camera.position.clone().sub(controls.target).normalize()
+    : new THREE.Vector3(0.75, 0.6, 1).normalize();
+
+  const position = centre.clone().add(direction.multiplyScalar(distance));
+  // The floor is solid, here as everywhere — see `GroundClamp`.
+  position.y = Math.max(position.y, EYE_FLOOR_M);
+  return { position, target: centre };
 }

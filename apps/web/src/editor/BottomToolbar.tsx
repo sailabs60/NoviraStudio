@@ -20,6 +20,7 @@ import { ImportFlow } from './ImportFlow';
 import { HelpTip } from '../components/ui';
 import { SaveViewButton } from './SavedViews';
 import { FloorPicker } from './FloorPicker';
+import { VenueBar } from './VenueBar';
 
 /**
  * The bar along the very bottom.
@@ -242,6 +243,15 @@ export function BottomToolbar({
         <ImageDown className="h-3.5 w-3.5" />
         {labels ? 'Import' : null}
       </button>
+
+      {/*
+        ── The room the plan is set in ──────────────────────────────────
+
+        Added here rather than anywhere existing being rearranged: everything
+        above keeps the position it has always had, and this appears to the
+        right of it only on a plan that actually has a venue. See `VenueBar`.
+      */}
+      <VenueBar labelled={labels} />
 
       <span className="mx-1 h-5 w-px shrink-0 bg-line" aria-hidden />
 

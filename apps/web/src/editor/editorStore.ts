@@ -23,6 +23,11 @@ import {
   type SurfaceFinish,
   type SavedView,
   type Vec3,
+  type VenueSite,
+  type SiteFloor,
+  activeFloor as activeSiteFloor,
+  refineSiteFromModel,
+  type SiteBoundsMm,
 } from '@novira/shared';
 import { createConstraint } from './factories';
 
@@ -164,6 +169,14 @@ interface EditorState {
   commit: (mutate: (draft: SceneDocument) => void) => void;
   /** Update the document without pushing an undo entry. */
   commitQuiet: (mutate: (draft: SceneDocument) => void) => void;
+  /**
+   * Reposition objects during a live gesture.
+   *
+   * The drag path, kept apart from `commitQuiet` because that one clones the
+   * whole document and a drag calls it on every pointer move. See the
+   * implementation for the measurements.
+   */
+  moveObjectsLive: (moves: Array<{ id: string; positionMm: Vec3 }>) => void;
   replaceScene: (next: SceneDocument) => void;
   undo: () => void;
   redo: () => void;
@@ -249,7 +262,119 @@ interface EditorState {
    * you started.
    */
   requestFrameSelection: () => void;
-  frameMode: 'all' | 'selection';
+  /**
+   * Frame the venue itself, ignoring everything modelled around it.
+   *
+   * The request a designer means by "show me the room". Framing *everything*
+   * on a plan set in a real hotel measures the forecourt and the car park the
+   * model happens to include, and lands the camera somewhere over the roof;
+   * this measures only the interior the plan records (see `venueSite`), so the
+   * view arrives inside the hall looking at the floor people are working on.
+   */
+  requestFrameVenue: () => void;
+  frameMode: 'all' | 'selection' | 'venue';
+
+  /* -- The room the plan is set in ------------------------------------ */
+  /**
+   * Convenience read of `scene.venueSite`, which is the authority.
+   *
+   * Mirrored onto the store root because it is consulted on every placement
+   * and on every camera frame, and reaching through `scene` for it in a
+   * `useEditor` selector re-runs that selector on every unrelated scene edit.
+   */
+  venueSite: VenueSite | null;
+  /** Record the room a newly applied venue describes. */
+  setVenueSite: (site: VenueSite | null) => void;
+  /**
+   * Tell the site how big the building's mesh actually turned out to be.
+   *
+   * Called once by the viewport when a venue shell finishes loading. Only the
+   * rendered geometry knows whether a record describing a 40 m ballroom
+   * arrived as a 40 m box or as a whole resort, and that ratio is what decides
+   * whether "focus the venue" is offered at all.
+   */
+  measureVenueModel: (boundsMm: SiteBoundsMm) => void;
+  /** Which storey new objects land on, and the camera is held to. */
+  setActiveFloor: (floorId: string) => void;
+  /**
+   * Keep the camera inside the venue rather than letting it drift outside.
+   *
+   * On by default whenever a site exists, and switchable because inspecting
+   * the outside of a building you have imported is a legitimate thing to want
+   * — it is simply never what somebody laying out chairs meant to do.
+   */
+  confineToVenue: boolean;
+  toggleConfineToVenue: () => void;
+
+  /* -- How much frame there is to spend ------------------------------- */
+  /**
+   * What the renderer is currently coping with, measured rather than guessed.
+   *
+   * `moving` is true while the view is being navigated and for a beat after;
+   * `heavy` is true when frames have been taking long enough that the full
+   * scene cannot be drawn at an interactive rate. Together they are the signal
+   * the expensive parts of the render read to stand down during a gesture and
+   * come back the instant it ends — see `useFrameBudget` for why a viewport
+   * that does not do this stops answering clicks entirely on a large plan.
+   */
+  frameBudget: { moving: boolean; heavy: boolean };
+  setFrameBudget: (budget: { moving: boolean; heavy: boolean }) => void;
+
+  /**
+   * The last thing placed, for a moment afterwards.
+   *
+   * A placement that succeeds and says nothing looks exactly like one that
+   * failed — which is why the most common thing a new user does after clicking
+   * the floor is click it again, and end up with two of everything. This is
+   * what the confirmation reads, and it clears itself.
+   */
+  lastPlaced: { name: string; at: number } | null;
+  notePlaced: (name: string) => void;
+
+  /* -- The AI section, driven from outside it ------------------------- */
+  /**
+   * Which tab of the AI section is open.
+   *
+   * Lifted out of the panel's own state because it is opened *at a particular
+   * tab* from four places that have nothing to do with each other — the button
+   * on the plan, the command palette, the header, and a panel handing work
+   * over. Threading a setter through the editor tree for one string is worse
+   * than a field here.
+   */
+  aiTab: 'concept' | 'assistant' | 'model' | 'artwork' | 'assets' | 'documents';
+  setAiTab: (tab: EditorState['aiTab']) => void;
+  /**
+   * A question to ask the assistant the moment it opens, consumed once.
+   *
+   * The command palette and several panels hand a question over rather than
+   * merely opening the panel, and an assistant that opens empty after you
+   * asked it something has lost the question.
+   */
+  aiSeed: string | null;
+  seedAiAsk: (text: string) => void;
+  takeAiSeed: () => string | null;
+
+  /**
+   * Bumped whenever something wants the left panel opened as well as chosen.
+   *
+   * Whether the sidebar is open is layout, and layout belongs to the page that
+   * owns it — but `setWorkPanel` is called from inside the viewport, from the
+   * command palette and from the plan itself, none of which can reach that
+   * page's state. A counter rather than a boolean, because two requests in a
+   * row must both be honoured even if the user shut the panel in between.
+   */
+  panelRequest: number;
+  requestPanel: (panel: WorkPanel) => void;
+  /**
+   * The same, for the properties dock on the right.
+   *
+   * "Edit" on the quick menu means *show me this object's settings*, and the
+   * dock it shows them in can perfectly well be closed — in which case the
+   * button appeared to do nothing at all, which is the worst outcome for the
+   * most obvious entry in the menu.
+   */
+  propertiesRequest: number;
+  requestProperties: () => void;
 
   /**
    * Held-right-click fly navigation is active.
@@ -486,6 +611,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       wallDrawing: false,
       selectedWallId: null,
       selectedFloorId: null,
+      // The room, mirrored out of the document it is stored in — see the note
+      // on `venueSite` in the state interface.
+      venueSite: scene.venueSite ?? null,
     });
   },
 
@@ -522,9 +650,69 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ scene: next, dirty: true });
   },
 
+  /**
+   * Move objects during a live gesture, without cloning the whole plan.
+   *
+   * ## Why this is separate from `commitQuiet`
+   *
+   * `commitQuiet` deep-clones the scene document. That is entirely correct for
+   * what it was written for — a setting changed once when a key is pressed —
+   * and entirely wrong for a drag, which calls it on **every pointer move**.
+   *
+   * On the 504-object banquet used to measure this, the document is a few
+   * hundred kilobytes of JSON and `structuredClone` of it costs several
+   * milliseconds. Pushing a chair across the room therefore cloned the entire
+   * plan sixty times a second, on the main thread, in competition with the
+   * renderer that was already struggling — which is precisely the "the viewport
+   * feels off while I am moving something" the drag is supposed to feel smooth
+   * during. It also produced a fresh object identity for every one of the plan's
+   * objects on every move, so every memo keyed on the objects array — the
+   * instancing batcher, the visible-object selector, the shadow extent — was
+   * invalidated and recomputed each time as well.
+   *
+   * ## What it does instead
+   *
+   * Copies the array and replaces only the entries that moved. The document
+   * object is new, and so is `objects`, so React and zustand both see the change
+   * — but the several hundred objects that did not move keep their identity, so
+   * everything memoised on them stays memoised. Nothing else in the document is
+   * touched or copied at all.
+   *
+   * History is deliberately untouched, exactly as `commitQuiet` leaves it: the
+   * gesture writes one undo entry when it *ends*, not two hundred as it runs.
+   */
+  moveObjectsLive: (moves) => {
+    const { scene, readOnly } = get();
+    if (readOnly || !moves.length) return;
+
+    const byId = new Map(moves.map((move) => [move.id, move.positionMm]));
+    let changed = false;
+    const objects = scene.objects.map((object) => {
+      const next = byId.get(object.id);
+      if (!next) return object;
+      const at = object.positionMm;
+      // An identical position is not a change, and writing one would discard
+      // this object's identity for nothing.
+      if (at && at.x === next.x && at.y === next.y && at.z === next.z) return object;
+      changed = true;
+      return { ...object, positionMm: next } as SceneObject;
+    });
+
+    if (!changed) return;
+    set({ scene: { ...scene, objects }, dirty: true });
+  },
+
   replaceScene: (next) => {
     const { scene, past } = get();
-    set({ scene: next, past: [...past, scene].slice(-HISTORY_LIMIT), future: [], dirty: true });
+    set({
+      scene: next,
+      past: [...past, scene].slice(-HISTORY_LIMIT),
+      future: [],
+      dirty: true,
+      // Applying a venue arrives through here, so this is where the room the
+      // plan is set in changes.
+      venueSite: next.venueSite ?? null,
+    });
   },
 
   undo: () => {
@@ -538,6 +726,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       dirty: true,
       // Selections can reference objects that no longer exist after an undo.
       selectedIds: get().selectedIds.filter((id) => previous.objects.some((o) => o.id === id)),
+      // Undoing past the point a venue was applied has to take the room with
+      // it, or placement keeps snapping to a floor that is no longer there.
+      venueSite: previous.venueSite ?? null,
     });
   },
 
@@ -551,6 +742,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       past: [...past, scene].slice(-HISTORY_LIMIT),
       dirty: true,
       selectedIds: get().selectedIds.filter((id) => next.objects.some((o) => o.id === id)),
+      venueSite: next.venueSite ?? null,
     });
   },
 
@@ -588,14 +780,122 @@ export const useEditor = create<EditorState>((set, get) => ({
   setFinishTarget: (finishTarget) => set({ finishTarget }),
 
   frameMode: 'all',
-  requestFrameAll: () => set((s) => ({ frameRequest: s.frameRequest + 1, frameMode: 'all' })),
+  requestFrameAll: () =>
+    set((s) => ({
+      frameRequest: s.frameRequest + 1,
+      /*
+       * "Everything" means the room, once there is a room.
+       *
+       * On a plan set in a real building, framing every mesh in the scene
+       * measures whatever the model carries around the hall — a forecourt, a
+       * car park, the neighbouring wing — and the camera ends up far enough
+       * out that the event reads as a smudge on a roof. Once a venue has told
+       * the plan where its walls stop, Fit means fit *that*, which is what
+       * somebody pressing it in a ballroom was asking for either way.
+       */
+      frameMode: s.venueSite ? 'venue' : 'all',
+    })),
+  requestFrameVenue: () =>
+    set((s) => ({
+      frameRequest: s.frameRequest + 1,
+      // No room recorded: the honest answer is still "show me everything".
+      frameMode: s.venueSite ? 'venue' : 'all',
+    })),
   requestFrameSelection: () =>
     set((s) => ({
       frameRequest: s.frameRequest + 1,
-      // Nothing selected is a request to see everything, not a request to
-      // fly to the origin and look at nothing.
-      frameMode: s.selectedIds.length ? 'selection' : 'all',
+      // Nothing selected is a request to see the room, not a request to fly
+      // to the origin and look at nothing.
+      frameMode: s.selectedIds.length ? 'selection' : s.venueSite ? 'venue' : 'all',
     })),
+
+  /* ── The room ──────────────────────────────────────────────────────── */
+
+  venueSite: null,
+  confineToVenue: true,
+
+  setVenueSite: (site) => {
+    set({ venueSite: site });
+    get().commitQuiet((draft) => {
+      draft.venueSite = site;
+    });
+  },
+
+  /*
+   * Written quietly and only when the figure actually moves.
+   *
+   * This is called from the render loop's own "the shell has loaded" effect,
+   * and a commit there would put a scene clone — and a dirty flag — on the
+   * critical path of the first frame after a 100 MB building arrives, which is
+   * already the slowest moment in the editor.
+   */
+  measureVenueModel: (boundsMm) => {
+    const site = get().venueSite;
+    if (!site) return;
+    const refined = refineSiteFromModel(site, boundsMm);
+    if (refined === site) return;
+    set({ venueSite: refined });
+    get().commitQuiet((draft) => {
+      draft.venueSite = refined;
+    });
+  },
+
+  setActiveFloor: (floorId) => {
+    const site = get().venueSite;
+    if (!site || site.activeFloorId === floorId) return;
+    if (!site.floors.some((f) => f.id === floorId)) return;
+    const next: VenueSite = { ...site, activeFloorId: floorId };
+    set({ venueSite: next });
+    get().commitQuiet((draft) => {
+      draft.venueSite = next;
+    });
+    // Changing storey is a navigation, so the view goes with it — arriving on
+    // a floor you cannot see is the same as not arriving.
+    set((s) => ({ frameRequest: s.frameRequest + 1, frameMode: 'venue' }));
+  },
+
+  toggleConfineToVenue: () => set((s) => ({ confineToVenue: !s.confineToVenue })),
+
+  panelRequest: 0,
+  requestPanel: (panel) =>
+    set((s) => ({ workPanel: panel, panelRequest: s.panelRequest + 1 })),
+  propertiesRequest: 0,
+  requestProperties: () => set((s) => ({ propertiesRequest: s.propertiesRequest + 1 })),
+
+  aiTab: 'concept',
+  setAiTab: (aiTab) => set({ aiTab }),
+  aiSeed: null,
+  seedAiAsk: (text) => set({ aiSeed: text, aiTab: 'assistant' }),
+  takeAiSeed: () => {
+    const seed = get().aiSeed;
+    if (seed) set({ aiSeed: null });
+    return seed;
+  },
+
+  lastPlaced: null,
+  notePlaced: (name) => {
+    set({ lastPlaced: { name, at: Date.now() } });
+    /*
+     * Cleared on a timer rather than by the component, so the message has the
+     * same life whether or not the viewport happens to re-render — and so a
+     * second placement during the window simply replaces it rather than
+     * stacking two confirmations on top of each other.
+     */
+    window.setTimeout(() => {
+      const current = get().lastPlaced;
+      if (current && Date.now() - current.at >= 2400) set({ lastPlaced: null });
+    }, 2500);
+  },
+
+  frameBudget: { moving: false, heavy: false },
+  setFrameBudget: (budget) =>
+    set((s) =>
+      // Written from the frame loop, so it must not produce a new object — and
+      // therefore a re-render of everything subscribed — on every frame.
+      s.frameBudget.moving === budget.moving && s.frameBudget.heavy === budget.heavy
+        ? s
+        : { frameBudget: budget }
+    ),
 
   markCameraTouched: () => {
     if (!get().cameraTouched) set({ cameraTouched: true });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { sharedMaterial } from './sharedMaterials';
+import { InstancedBoxes, type BoxPlacement } from './InstancedBoxes';
 import * as THREE from 'three';
 import { invalidate } from '@react-three/fiber';
 import {
@@ -88,6 +88,52 @@ export function Stage3D({ stage, selected }: Props) {
   const deckRef = useRef<THREE.InstancedMesh>(null);
   const deckCount = Math.max(1, stage.deckRows * stage.deckColumns);
 
+  /*
+   * Where every piece of edge extrusion and every leg goes.
+   *
+   * Computed once per shape rather than rebuilt as React elements on each
+   * render, and split by orientation because the two runs are different boxes:
+   * one spans the module across, the other along it. Two arrays and two draws
+   * replace four meshes per module.
+   */
+  const { frameAcross, frameAlong, legs } = useMemo(() => {
+    const across: BoxPlacement[] = [];
+    const along: BoxPlacement[] = [];
+    const y = height - deckThickness / 2;
+
+    for (let row = 0; row < stage.deckRows; row += 1) {
+      for (let col = 0; col < stage.deckColumns; col += 1) {
+        const cx = -halfW + (col + 0.5) * deck;
+        const cz = -halfD + (row + 0.5) * deck;
+        for (const s of [-1, 1] as const) {
+          across.push({ position: [cx, y, cz + (s * deck) / 2] });
+          along.push({ position: [cx + (s * deck) / 2, y, cz] });
+        }
+      }
+    }
+
+    const posts: BoxPlacement[] = [];
+    if (stage.deckHeightMm > 60) {
+      const legY = (height - deckThickness) / 2;
+      for (let row = 0; row <= stage.deckRows; row += 1) {
+        for (let col = 0; col <= stage.deckColumns; col += 1) {
+          posts.push({ position: [-halfW + col * deck, legY, -halfD + row * deck] });
+        }
+      }
+    }
+
+    return { frameAcross: across, frameAlong: along, legs: posts };
+  }, [
+    stage.deckRows,
+    stage.deckColumns,
+    stage.deckHeightMm,
+    deck,
+    halfW,
+    halfD,
+    height,
+    deckThickness,
+  ]);
+
   // Place every deck module. Positions live in the matrix buffer rather than
   // as props on a few hundred React elements.
   useEffect(() => {
@@ -139,67 +185,43 @@ export function Stage3D({ stage, selected }: Props) {
         The aluminium edge frame around every deck. This is what makes the
         modularity visible — without it a 4 × 6 grid and one big slab look the
         same, and the parts list beside it stops making sense.
-      */}
-      {Array.from({ length: stage.deckRows }).flatMap((_, row) =>
-        Array.from({ length: stage.deckColumns }).map((__, col) => {
-          const cx = -halfW + (col + 0.5) * deck;
-          const cz = -halfD + (row + 0.5) * deck;
-          const rail = mmToWorld(45);
-          const y = height - deckThickness / 2;
-          return (
-            <group key={`edge-${row}-${col}`}>
-              {([-1, 1] as const).map((s) => (
-                <mesh
-                  key={`x${s}`}
-                  position={[cx, y, cz + (s * deck) / 2]}
-                  castShadow
-                  userData={{ part: 'deck-frame' }}
-                >
-                  <boxGeometry args={[deck, deckThickness * 1.05, rail]} />
-                  <primitive
-                    object={sharedMaterial({ color: frameColor, metalness: 0.72, roughness: 0.34 })}
-                    attach="material"
-                  />
-                </mesh>
-              ))}
-              {([-1, 1] as const).map((s) => (
-                <mesh
-                  key={`z${s}`}
-                  position={[cx + (s * deck) / 2, y, cz]}
-                  castShadow
-                  userData={{ part: 'deck-frame' }}
-                >
-                  <boxGeometry args={[rail, deckThickness * 1.05, deck]} />
-                  <primitive
-                    object={sharedMaterial({ color: frameColor, metalness: 0.72, roughness: 0.34 })}
-                    attach="material"
-                  />
-                </mesh>
-              ))}
-            </group>
-          );
-        })
-      )}
 
-      {/* Legs at the shared grid intersections. */}
-      {stage.deckHeightMm > 60
-        ? Array.from({ length: stage.deckRows + 1 }).flatMap((_, row) =>
-            Array.from({ length: stage.deckColumns + 1 }).map((__, col) => (
-              <mesh
-                key={`leg-${row}-${col}`}
-                position={[-halfW + col * deck, (height - deckThickness) / 2, -halfD + row * deck]}
-                castShadow
-                userData={{ part: 'legs' }}
-              >
-                <boxGeometry args={[mmToWorld(50), height - deckThickness, mmToWorld(50)]} />
-                <primitive
-                  object={sharedMaterial({ color: '#7d838c', metalness: 0.7, roughness: 0.35 })}
-                  attach="material"
-                />
-              </mesh>
-            ))
-          )
-        : null}
+        Batched in two draws rather than four per module. A 5 × 11 stage — an
+        ordinary size for a conference — is 55 modules, and a mesh per rail is
+        220 draw calls for 220 identical extrusions that differ only in where
+        they are. Measured on a real plan, the stage alone was 326 of the
+        scene's 812 meshes and the single largest thing standing between that
+        room and a frame rate you could navigate at. The picture is unchanged:
+        same geometry, same material, same named part for finishes.
+      */}
+      <InstancedBoxes
+        part="deck-frame"
+        size={[deck, deckThickness * 1.05, mmToWorld(45)]}
+        color={frameColor}
+        metalness={0.72}
+        roughness={0.34}
+        placements={frameAcross}
+      />
+      <InstancedBoxes
+        part="deck-frame"
+        size={[mmToWorld(45), deckThickness * 1.05, deck]}
+        color={frameColor}
+        metalness={0.72}
+        roughness={0.34}
+        placements={frameAlong}
+      />
+
+      {/* Legs at the shared grid intersections, likewise in one draw. */}
+      {stage.deckHeightMm > 60 ? (
+        <InstancedBoxes
+          part="legs"
+          size={[mmToWorld(50), Math.max(0.001, height - deckThickness), mmToWorld(50)]}
+          color="#7d838c"
+          metalness={0.7}
+          roughness={0.35}
+          placements={legs}
+        />
+      ) : null}
 
       {/*
         Diagonal bracing under a tall stage.

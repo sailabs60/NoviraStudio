@@ -70,8 +70,18 @@ export function ObjectQuickActions({
     <>
       {/* Click anywhere else to dismiss. */}
       <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
+      {/*
+        Hung off the strip, opening whichever way there is room for it.
+
+        `left-0` rather than centred on the strip: the strip is now a short
+        horizontal row rather than a tall column, so a 340 px window centred on
+        it would hang 80 px off each end — and the end it hangs off is very
+        often the canvas edge the strip was just pushed away from. Aligning the
+        two left edges keeps the window inside whatever space the strip itself
+        was placed in.
+      */}
       <div
-        className={`pointer-events-auto absolute left-1/2 z-30 w-[340px] -translate-x-1/2 ${
+        className={`pointer-events-auto absolute left-0 z-30 w-[340px] max-w-[calc(100vw-2rem)] ${
           flipped ? 'top-full mt-1.5' : 'bottom-full mb-1.5'
         }`}
       >
