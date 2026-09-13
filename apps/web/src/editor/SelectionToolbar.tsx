@@ -14,7 +14,7 @@ import {
   Trash2,
   Unlock,
 } from 'lucide-react';
-import { useEditor } from './editorStore';
+import { useEditor, type SelectionAnchor } from './editorStore';
 import { useSelectedObjects } from './selectors';
 import { ObjectQuickActions } from './ObjectQuickActions';
 
@@ -501,7 +501,7 @@ function stripWidth(selectedCount: number): number {
  * the transform rail and the compass.
  */
 function choosePlacement(
-  anchor: { x: number; top: number; bottom: number } | null,
+  anchor: SelectionAnchor | null,
   frame: { width: number; height: number },
   width: number,
   height: number
@@ -516,21 +516,22 @@ function choosePlacement(
   }
 
   /*
-   * The selection's screen box.
+   * The selection's screen box — measured, on all four sides.
    *
-   * `SelectionAnchor` publishes the horizontal centre and the top and bottom
-   * edges of the projected bounding box. The horizontal extent has to be
-   * estimated from the vertical one, because that is all there is — and a
-   * square guess is the safe one: it errs towards treating the object as wider
-   * than it is, which pushes the strip further clear rather than closer.
+   * `SelectionAnchor` publishes the projected bounding box of the selected
+   * meshes, so this is the real extent rather than a guess from the height. It
+   * matters most on exactly the objects a menu is most likely to sit on top
+   * of: a stage or an LED wall is many times wider than it is tall on screen,
+   * and a strip placed "clear" of a square estimate lands in the middle of it.
+   *
+   * A minimum of a few pixels, because an object seen edge-on projects to
+   * almost nothing and a zero-width box makes every candidate look clear.
    */
-  const objectHeight = Math.max(24, anchor.bottom - anchor.top);
-  const halfWidth = objectHeight / 2;
   const box = {
-    left: anchor.x - halfWidth,
-    right: anchor.x + halfWidth,
+    left: Math.min(anchor.left, anchor.x - 12),
+    right: Math.max(anchor.right, anchor.x + 12),
     top: anchor.top,
-    bottom: anchor.bottom,
+    bottom: Math.max(anchor.bottom, anchor.top + 24),
   };
   const middle = (anchor.top + anchor.bottom) / 2 - height / 2;
 

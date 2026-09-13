@@ -40,6 +40,16 @@ function newObjectId(): string {
 
 export type Tool = 'select' | 'box-select' | 'line' | 'shape' | 'wall' | 'draw' | 'constraint';
 
+/** The selection's projected screen box — see `selectionAnchor`. */
+export interface SelectionAnchor {
+  /** Horizontal centre, kept because almost every consumer wants it. */
+  x: number;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
 /**
  * The left rail's sections.
  *
@@ -200,14 +210,16 @@ interface EditorState {
    * Where the selection is on screen, in canvas pixels, so the quick toolbar
    * can sit beside it.
    *
-   * `x` is the horizontal centre of the selection and `top`/`bottom` are the
-   * edges of its projected bounding box — enough for the toolbar to place
-   * itself clear of the object rather than over it, and to flip underneath
-   * when there is no room above. Computed inside the Canvas, where the camera
-   * is; consumed outside it, where the HTML is.
+   * All four edges of the projected bounding box, plus its horizontal centre —
+   * enough for the toolbar to find a position that does not overlap the object
+   * at all, rather than one that merely avoids its middle. The horizontal pair
+   * matters as much as the vertical: a stage or an LED wall is many times wider
+   * than it is tall on screen, and a toolbar placed from the vertical extent
+   * alone lands on top of it. Computed inside the Canvas, where the camera is;
+   * consumed outside it, where the HTML is.
    */
-  selectionAnchor: { x: number; top: number; bottom: number } | null;
-  setSelectionAnchor: (anchor: { x: number; top: number; bottom: number } | null) => void;
+  selectionAnchor: SelectionAnchor | null;
+  setSelectionAnchor: (anchor: SelectionAnchor | null) => void;
 
   /**
    * The LED screen whose in-viewport editor is open, if any.
@@ -286,14 +298,25 @@ interface EditorState {
   /** Record the room a newly applied venue describes. */
   setVenueSite: (site: VenueSite | null) => void;
   /**
-   * Tell the site how big the building's mesh actually turned out to be.
+   * Tell the site what the building's mesh actually turned out to be.
    *
-   * Called once by the viewport when a venue shell finishes loading. Only the
-   * rendered geometry knows whether a record describing a 40 m ballroom
-   * arrived as a 40 m box or as a whole resort, and that ratio is what decides
-   * whether "focus the venue" is offered at all.
+   * Called once by the viewport when a venue shell finishes loading, because
+   * only the rendered geometry can answer two questions the record cannot:
+   *
+   *  · **How much of the model is not the room** — a record describing a 51 m
+   *    ballroom may arrive as a 51 m box or as a whole hotel, and that ratio
+   *    decides whether focusing on the venue is worth doing at all.
+   *  · **Where in the model the room actually is.** The record says how big it
+   *    is; nobody recorded where, so every consumer assumed the origin. On the
+   *    Johari Rotana the ballroom sits 12.3 m off-centre, which is why framing
+   *    the "room" landed the camera in a corridor. See `measureVenue.ts`.
    */
-  measureVenueModel: (boundsMm: SiteBoundsMm) => void;
+  measureVenueModel: (measured: {
+    modelBoundsMm: SiteBoundsMm;
+    /** Where the room was found, when it could be picked out of the mesh. */
+    roomBoundsMm?: SiteBoundsMm | null;
+    roomFloorMm?: number | null;
+  }) => void;
   /** Which storey new objects land on, and the camera is held to. */
   setActiveFloor: (floorId: string) => void;
   /**
@@ -829,14 +852,64 @@ export const useEditor = create<EditorState>((set, get) => ({
    * critical path of the first frame after a 100 MB building arrives, which is
    * already the slowest moment in the editor.
    */
-  measureVenueModel: (boundsMm) => {
+  measureVenueModel: ({ modelBoundsMm, roomBoundsMm, roomFloorMm }) => {
     const site = get().venueSite;
     if (!site) return;
-    const refined = refineSiteFromModel(site, boundsMm);
-    if (refined === site) return;
-    set({ venueSite: refined });
+
+    let next = refineSiteFromModel(site, modelBoundsMm);
+
+    /*
+     * Move the room to where it was actually found.
+     *
+     * The recorded dimensions stay authoritative — a person measured those —
+     * but the *position* comes from the mesh, because nothing recorded it and
+     * assuming the origin is what put the camera in a corridor. Both the site's
+     * own interior and the storey being designed on are moved together, so
+     * framing, placement and confinement all agree about where the room is.
+     */
+    if (roomBoundsMm) {
+      const floorMm = typeof roomFloorMm === 'number' ? roomFloorMm : 0;
+      /*
+       * Only when it has actually moved.
+       *
+       * This runs every time the shell finishes loading, which is every time
+       * the plan is opened. Rewriting the same rectangle each time would mark
+       * the document dirty on load and trigger an autosave of a plan nobody
+       * has edited — which is both a wasted write and, worse, a "saving…"
+       * flicker that makes the editor look like it is doing something behind
+       * the user's back.
+       */
+      const already =
+        next.interiorMm.minX === roomBoundsMm.minX &&
+        next.interiorMm.maxX === roomBoundsMm.maxX &&
+        next.interiorMm.minZ === roomBoundsMm.minZ &&
+        next.interiorMm.maxZ === roomBoundsMm.maxZ;
+      if (already) {
+        if (next === site) return;
+        set({ venueSite: next });
+        get().commitQuiet((draft) => {
+          draft.venueSite = next;
+        });
+        return;
+      }
+
+      next = {
+        ...next,
+        interiorMm: roomBoundsMm,
+        floors: next.floors.map((floor) =>
+          // Only the storey the room was found on: a mezzanine above it keeps
+          // its own extent, which is the whole reason storeys are separate.
+          Math.abs(floor.elevationMm - floorMm) <= 1200
+            ? { ...floor, boundsMm: roomBoundsMm, elevationMm: floorMm }
+            : floor
+        ),
+      };
+    }
+
+    if (next === site) return;
+    set({ venueSite: next });
     get().commitQuiet((draft) => {
-      draft.venueSite = refined;
+      draft.venueSite = next;
     });
   },
 

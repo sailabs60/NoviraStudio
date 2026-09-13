@@ -72,6 +72,7 @@ import { WalkthroughCamera } from './WalkthroughCamera';
 import { isSoftwareRenderer, useRendererProfile } from './rendererProfile';
 import { applyFinishes, clearFinishes } from './finishRenderer';
 import { registerPicking, surfaceHeightAt } from './picking';
+import { locateRoom } from './measureVenue';
 import { StudioStage3D, ToneMapping } from './StudioStage3D';
 import { DropPreview } from './DropPreview';
 import { InstancedCatalog, useInstancedBatches } from './InstancedCatalog';
@@ -245,15 +246,39 @@ function LoadedModel({
   useEffect(() => {
     if (!isVenueShell) return;
 
+    const store = useEditor.getState();
     const box = new THREE.Box3().setFromObject(instance);
-    if (!box.isEmpty() && Number.isFinite(box.min.x)) {
-      useEditor.getState().measureVenueModel({
+    if (box.isEmpty() || !Number.isFinite(box.min.x)) return;
+
+    const site = store.venueSite;
+    /*
+     * Where the room is, found in the geometry.
+     *
+     * Only attempted when the plan knows what it is looking for: the recorded
+     * dimensions are what make the search a match rather than a guess. See
+     * `measureVenue.ts` for why the largest slab is the wrong answer.
+     */
+    const wanted = site ? activeSiteFloor(site) : null;
+    const located =
+      site && wanted
+        ? locateRoom(
+            instance,
+            boundsWidthMm(site.interiorMm),
+            boundsDepthMm(site.interiorMm),
+            wanted.elevationMm
+          )
+        : null;
+
+    store.measureVenueModel({
+      modelBoundsMm: {
         minX: Math.round(worldToMm(box.min.x)),
         maxX: Math.round(worldToMm(box.max.x)),
         minZ: Math.round(worldToMm(box.min.z)),
         maxZ: Math.round(worldToMm(box.max.z)),
-      });
-    }
+      },
+      roomBoundsMm: located?.bounds ?? null,
+      roomFloorMm: located?.yMm ?? null,
+    });
 
     // Moving someone's view out from under them is worse than an awkward
     // first frame, so a camera they have already touched is left alone.
@@ -1782,35 +1807,20 @@ function GroundClamp({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
       const bounds = floor ? floor.boundsMm : site.interiorMm;
 
       /*
-       * How far outside the walls the eye may go, sized to the room.
+       * How far outside the walls the eye may go.
        *
-       * A fixed two and a half metres is right for a square hall and quite
-       * wrong for a long one. The Johari Rotana is 51 m across and 16 m deep:
-       * fitting its full width in frame needs the camera about forty metres
-       * back, which is twenty-four metres outside a room only sixteen deep.
-       * That is not a mistake — it is the vantage every architectural render
-       * of a long, shallow room is taken from, and the alternative is a view
-       * that can never contain the room it is confined to.
+       * A modest fixed allowance is right now that framing puts the camera
+       * *inside* the room rather than backing it off until the whole floor
+       * fits (see `frameTarget`). An earlier version scaled this to the room's
+       * own dimensions so a 41 m stand-off could be reached — which it could,
+       * and the resulting view was the outside of the ballroom's wall, because
+       * a room with a roof can only be seen from within it.
        *
-       * So the allowance on each axis is the *other* axis's extent: a room
-       * that is long in X may be viewed from far out in Z, and vice versa,
-       * which is exactly the room it takes to see the long dimension. A square
-       * room gets a symmetric and modest allowance out of the same rule, which
-       * is why it is one rule rather than a special case.
-       *
-       * Confinement still does its real job. The camera cannot wander off down
-       * the street, it cannot get behind the building, and — the part that
-       * actually makes navigation feel like a room — the *pivot* stays on the
-       * floor plan, held far more tightly a few lines below.
+       * A couple of metres of give is what stops a camera at the back of a hall
+       * having its nose against the plaster; anything more is not needed by any
+       * view worth arriving at.
        */
-      const spanX = boundsWidthMm(bounds);
-      const spanZ = boundsDepthMm(bounds);
-      const eyeLimit = {
-        minX: bounds.minX - Math.max(SITE_EYE_SLACK_MM, spanZ),
-        maxX: bounds.maxX + Math.max(SITE_EYE_SLACK_MM, spanZ),
-        minZ: bounds.minZ - Math.max(SITE_EYE_SLACK_MM, spanX),
-        maxZ: bounds.maxZ + Math.max(SITE_EYE_SLACK_MM, spanX),
-      };
+      const eyeLimit = expandBounds(bounds, SITE_EYE_SLACK_MM);
       const eyeX = mmToWorld(eyeLimit.minX);
       const eyeMaxX = mmToWorld(eyeLimit.maxX);
       const eyeZ = mmToWorld(eyeLimit.minZ);
@@ -1834,24 +1844,29 @@ function GroundClamp({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
        * enough to stay under the structure.
        */
       /*
-       * A ceiling, but only over the room.
+       * A ceiling as well as a floor, while the eye is over the room.
        *
        * Inside the walls, rising through the roof is what makes the event
-       * vanish behind opaque structure — so the clear height is the limit, and
-       * the view stays under it. *Outside* the walls there is nothing to see
-       * through and the height is simply how far back the camera had to go to
-       * take the room in, which for a long hall is a good way up. Applying the
-       * indoor ceiling out there would flatten every framing of a large room
-       * into a view from knee height.
+       * vanish behind opaque structure: the view is suddenly of a grey slab and
+       * it reads as something having broken. So the storey's clear height is
+       * the limit, and zooming out stops under it rather than through it.
+       *
+       * The two metres of slack outside the walls are exempt, because that is
+       * where somebody has deliberately stepped back from a doorway to see in,
+       * and there is no roof over them to hide behind.
        */
-      const inside = withinBounds(bounds, worldToMm(camera.position.x), worldToMm(camera.position.z));
+      const overTheRoom = withinBounds(
+        bounds,
+        worldToMm(camera.position.x),
+        worldToMm(camera.position.z)
+      );
       const headroom = floor?.clearHeightMm ? mmToWorld(floor.clearHeightMm) : 0;
-      const ceiling = inside
-        ? floorY + (headroom > 2 ? headroom * 0.95 : 24)
-        : floorY + Math.max(24, mmToWorld(Math.max(spanX, spanZ)));
-      if (camera.position.y > ceiling) {
-        camera.position.y = ceiling;
-        corrected = true;
+      if (overTheRoom) {
+        const ceiling = floorY + (headroom > 2 ? headroom * 0.95 : 24);
+        if (camera.position.y > ceiling) {
+          camera.position.y = ceiling;
+          corrected = true;
+        }
       }
 
       const pivot = clampToBounds(
@@ -2359,7 +2374,9 @@ function SelectionAnchor() {
   const { scene, camera, size } = useThree();
   const selectedIds = useEditorShallow((s) => s.selectedIds);
   const setSelectionAnchor = useEditor((s) => s.setSelectionAnchor);
-  const last = useRef<{ x: number; top: number; bottom: number } | null>(null);
+  const last = useRef<{ x: number; left: number; right: number; top: number; bottom: number } | null>(
+    null
+  );
 
   useEffect(() => {
     if (!selectedIds.length) {
@@ -2406,11 +2423,32 @@ function SelectionAnchor() {
       maxY = Math.max(maxY, sy);
     }
 
-    const next = { x: Math.round((minX + maxX) / 2), top: Math.round(minY), bottom: Math.round(maxY) };
+    /*
+     * Both edges, not only the centre.
+     *
+     * `minX` and `maxX` were already measured here and then thrown away, so the
+     * quick menu had to *estimate* how wide the selection was — it assumed a
+     * square, from the vertical extent. For a stage or an LED wall, which are
+     * many times wider than they are tall on screen, that estimate is badly
+     * short, and the menu placed itself "clear" of a box far narrower than the
+     * real one: straight across the object it was supposed to sit beside.
+     *
+     * Publishing what was already known costs two numbers and makes the
+     * placement exact.
+     */
+    const next = {
+      x: Math.round((minX + maxX) / 2),
+      left: Math.round(minX),
+      right: Math.round(maxX),
+      top: Math.round(minY),
+      bottom: Math.round(maxY),
+    };
     const previous = last.current;
     if (
       previous &&
       Math.abs(previous.x - next.x) < 2 &&
+      Math.abs(previous.left - next.left) < 2 &&
+      Math.abs(previous.right - next.right) < 2 &&
       Math.abs(previous.top - next.top) < 2 &&
       Math.abs(previous.bottom - next.bottom) < 2
     ) {
@@ -3353,62 +3391,82 @@ function frameTarget(
       );
 
       /*
-       * Far enough back to take the room in, and no further.
+       * ## Standing in the room, not looking at the building
        *
-       * Fitting the *diagonal* — which is what a bounding-sphere fit does —
-       * leaves a third of the frame empty on the short axis for no gain.
+       * This is the part that decides whether a venue feels navigable, and the
+       * obvious approach gets it exactly wrong.
        *
-       * The camera backs off the short side (see the direction below), so the
-       * room's long dimension is what has to fit the frame's **width** and its
-       * short dimension is what has to fit the frame's **height** once
-       * foreshortened by the viewing angle. Getting these two the wrong way
-       * round is what put the camera 28 m into a hall only 16 m deep.
-       */
-      const fov = (camera.fov * Math.PI) / 180;
-      const aspect = camera.aspect || 1.6;
-      const acrossFrame = Math.max(width, depth);
-      const intoFrame = Math.min(width, depth);
-      // Horizontal half-angle: the frame is wider than it is tall.
-      const halfAngleX = Math.atan(Math.tan(fov / 2) * aspect);
-      const byWidth = acrossFrame / 2 / Math.tan(halfAngleX);
-      const byHeight = intoFrame / 2 / Math.tan(fov / 2);
-      const distance = Math.max(byWidth, byHeight, 6) * 1.1;
-
-      /*
-       * Looking *across* the room from outside its short side.
+       * The obvious approach is to fit the room to the frame: work out how far
+       * back the camera must be for 51 m of ballroom to span the viewport, and
+       * put it there. For the Johari Rotana that is forty-one metres — and the
+       * room is only sixteen metres deep, so forty-one metres back is twenty-
+       * five metres *outside the building*, looking at the outside of its wall.
+       * Verified in the browser: the whole hall fits the frame beautifully and
+       * every square metre of it is hidden behind masonry.
        *
-       * The instinct is to look down the long axis, as a photographer would.
-       * Measured against the Johari Rotana — 51 m wide and 16 m deep — that is
-       * wrong: standing at one end of a hall three times longer than it is
-       * deep puts the camera 28 m out along the length, inside the building,
-       * with the near wall filling two-thirds of the frame and the far end
-       * vanishing to a point. The room is unreadable and, worse, it looks like
-       * the view is broken rather than merely badly chosen.
-       *
-       * Backing off the *short* side instead means the long dimension runs
-       * left-to-right across the frame, which is the composition every venue
-       * floor plan and every ballroom photograph uses, and the one where the
-       * whole room is visible at once.
-       *
-       * The elevation is a little over half the stand-off distance rather than
-       * a fixed angle, which keeps a small meeting room from being viewed from
-       * its own ceiling and a large hall from being viewed from the street.
+       * A room with a roof and walls can only be seen from inside it. So the
+       * camera is placed **in the room**, in the corner furthest from the
+       * action, at eye height — which is where a person walking into a hall
+       * actually stands, and the view every venue photograph is taken from.
+       * What is given up is fitting the entire floor in one frame, and that was
+       * never worth having: the way to see all of a 51 m hall at once is the
+       * Plan view, which is one button away and exists for precisely this.
        */
       const wideOnX = width >= depth;
-      const direction = new THREE.Vector3(wideOnX ? 0.28 : 1, 0.52, wideOnX ? 1 : 0.28).normalize();
-      const position = focus.clone().add(direction.multiplyScalar(distance));
 
       /*
-       * Never below the floor of the storey being framed, and never above its
-       * ceiling. A mezzanine framed from over the slab above it shows the slab.
+       * The corner to stand in.
+       *
+       * Backed into the short axis as far as the room allows, and a little way
+       * along the long one so the view is a three-quarter rather than a flat
+       * elevation — a dead-on view of a rectangular room reads as a drawing,
+       * and the diagonal is what makes it read as a space.
+       *
+       * A metre and a half of clearance from each wall: close enough to use the
+       * whole room, far enough that the near wall is not in the lens and the
+       * `GroundClamp` slack is never in tension with where framing put the
+       * camera.
        */
-      const headroom = floor.clearHeightMm ? mmToWorld(floor.clearHeightMm) : Infinity;
-      position.y = Math.min(
-        Math.max(position.y, elevation + 1.2),
-        elevation + Math.max(3, headroom * 0.92)
+      const inset = 1.5;
+      const backOff = Math.max(2, (wideOnX ? depth : width) / 2 - inset);
+      const alongOff = Math.max(2, (wideOnX ? width : depth) / 2 - inset) * 0.42;
+
+      /*
+       * Eye height, scaled a little by the size of the room.
+       *
+       * A person's eye in a small meeting room and in a ballroom is at the same
+       * height, but a camera in a ballroom wants to be a touch higher so the
+       * far half of the floor is not hidden behind the near half. Capped under
+       * the ceiling either way, because a view from inside the roof structure
+       * shows the roof structure.
+       */
+      const headroom = floor.clearHeightMm ? mmToWorld(floor.clearHeightMm) : 0;
+      const eye = Math.min(
+        headroom > 2.5 ? headroom * 0.55 : 4,
+        Math.max(1.7, Math.min(width, depth) * 0.16)
       );
 
-      return { position, target: focus };
+      const position = new THREE.Vector3(
+        focus.x + (wideOnX ? alongOff : backOff),
+        elevation + eye,
+        focus.z + (wideOnX ? backOff : alongOff)
+      );
+
+      /*
+       * Aim across the room rather than at its exact centre.
+       *
+       * Looking at the middle of the floor from a corner puts the far half of
+       * the room in the top of the frame and the near floor in the bottom two
+       * thirds, which wastes the view on carpet. Aiming a little past the
+       * centre and at standing height fills the frame with the part of the room
+       * an event goes in.
+       */
+      const aim = focus.clone();
+      aim.y = elevation + Math.min(2.2, eye * 0.75);
+      aim.x -= (position.x - focus.x) * 0.25;
+      aim.z -= (position.z - focus.z) * 0.25;
+
+      return { position, target: aim };
     }
   }
 
