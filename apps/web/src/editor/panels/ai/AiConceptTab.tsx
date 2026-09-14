@@ -1,15 +1,10 @@
 /**
  * AI Conceptualization — the wizard.
  *
- * "Describe your event vision and let AI turn it into a complete concept."
- *
- * The layout follows the reference: your words in a tinted box beside a small
- * avatar, the AI's reading underneath as a ticked list of what it understood,
- * and a closing note about what can be done with the concept now it exists.
- *
- * The one thing this does that a chat product does not is **finish the job in
- * the room**. A concept that reads well and leaves the plan empty is the
- * failure the old studio had; the button at the bottom builds it.
+ * Kept chat-simple on the way in: a plain input box, a mic, examples to tap.
+ * No preamble, no labels. The reading underneath appears as a ticked list of
+ * what it understood, and the one thing this does that a chat product does
+ * not is **finish the job in the room** — the button at the bottom builds it.
  */
 import { useMemo, useState } from 'react';
 import {
@@ -21,7 +16,6 @@ import {
   Mic,
   MicOff,
   Sparkles,
-  User,
   Wand2,
 } from 'lucide-react';
 import { createRoom, generateConcept, parseBrief, type ConceptResult, type SceneObject } from '@novira/shared';
@@ -209,49 +203,34 @@ export function AiConceptTab() {
   return (
     <div className="space-y-3">
       <div className="ai-card">
-        <div className="ai-card-head">
-          <span className="ai-card-icon">
-            <Wand2 className="h-4 w-4" />
-          </span>
-          <h3 className="ai-card-title">AI Conceptualization</h3>
-        </div>
-        <p className="ai-card-note">
-          Describe your event vision and let AI turn it into a complete concept.
-        </p>
-
-        {/* Your words, beside a small avatar — as in the reference. */}
-        <div className="mt-3 flex gap-2">
-          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted">
-            <User className="h-3.5 w-3.5 text-ink-subtle" />
-          </span>
-          <div className="relative min-w-0 flex-1">
-            <textarea
-              value={prompt + (dictation.interim ? ` ${dictation.interim}` : '')}
-              onChange={(e) => {
-                setPrompt(e.target.value);
-                read(e.target.value);
-              }}
-              rows={5}
-              placeholder="Create a modern corporate event setup for 500 guests with a stage, dining area, brand displays and elegant lighting. Use a blue and white theme."
-              className="ai-prompt min-h-[112px] pr-9"
-            />
-            {dictation.supported ? (
-              <button
-                type="button"
-                onClick={dictation.toggle}
-                aria-label={dictation.listening ? 'Stop dictating' : 'Dictate the brief'}
-                className={`absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg transition ${
-                  dictation.listening ? 'bg-primary text-primary-fg' : 'text-ink-subtle hover:bg-surface-muted'
-                }`}
-              >
-                {dictation.listening ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-              </button>
-            ) : null}
-          </div>
+        {/* Chat-input style: just a box, a mic, and a send action. No preamble. */}
+        <div className="relative min-w-0 flex-1">
+          <textarea
+            value={prompt + (dictation.interim ? ` ${dictation.interim}` : '')}
+            onChange={(e) => {
+              setPrompt(e.target.value);
+              read(e.target.value);
+            }}
+            rows={4}
+            placeholder="Describe the event you want…"
+            className="ai-prompt min-h-[92px] pr-9"
+          />
+          {dictation.supported ? (
+            <button
+              type="button"
+              onClick={dictation.toggle}
+              aria-label={dictation.listening ? 'Stop dictating' : 'Dictate the brief'}
+              className={`absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg transition ${
+                dictation.listening ? 'bg-primary text-primary-fg' : 'text-ink-subtle hover:bg-surface-muted'
+              }`}
+            >
+              {dictation.listening ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+            </button>
+          ) : null}
         </div>
 
         {dictation.listening ? (
-          <p className="mt-1.5 flex items-center gap-1.5 pl-9 text-[10px] text-primary">
+          <p className="mt-1.5 flex items-center gap-1.5 text-[10px] text-primary">
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
@@ -261,23 +240,13 @@ export function AiConceptTab() {
         ) : null}
 
         {/*
-          The examples, readable.
-
-          They were pills truncated to 26 characters, which turned three
-          genuinely useful starting briefs into "Create a modern corporate …",
-          "A wedding reception for 15…" and "An awards evening for 400 …" — three
-          near-identical grey stubs that say nothing about what each one would
-          produce. The point of an example brief is that reading it teaches you
-          how to write one, and a truncated one teaches nothing.
+          The examples, readable, and unlabeled — just tap one.
 
           Only shown while the box is empty. Once there is a brief in it they
           are noise, and the space belongs to what the engine made of it.
         */}
         {!prompt.trim() ? (
-          <div className="mt-2.5 space-y-1 pl-9">
-            <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-subtle">
-              Or start from one of these
-            </p>
+          <div className="mt-2.5 space-y-1">
             {EXAMPLES.map((example) => (
               <button
                 key={example}
@@ -294,15 +263,7 @@ export function AiConceptTab() {
           </div>
         ) : null}
 
-        {/*
-          Reading happens as you type, free and instantly. This is only for
-          wording the parser cannot follow, so it sits quietly beside a line
-          saying as much rather than looking like the button that does the work.
-        */}
-        <div className="mt-2.5 flex items-center gap-2 pl-9">
-          <p className="min-w-0 flex-1 text-[10px] leading-snug text-ink-subtle">
-            Read as you type, free. Use the model only for looser wording.
-          </p>
+        <div className="mt-2.5 flex justify-end">
           <button
             type="button"
             className="ai-btn shrink-0 px-2.5 py-1.5 text-[11px]"
