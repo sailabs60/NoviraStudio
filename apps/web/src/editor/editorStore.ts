@@ -574,7 +574,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   drawKind: 'dimension',
   drawStyle: { ...DEFAULT_DRAWING_STYLE },
   drawElevationMm: 0,
-  showMeasurements: true,
+  showMeasurements: false,
   wallHover: null,
   wallDrawing: false,
   selectedWallId: null,

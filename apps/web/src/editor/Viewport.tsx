@@ -296,6 +296,39 @@ function LoadedModel({
     useEditor.getState().requestFrameVenue();
   }, [isVenueShell, instance]);
 
+  /*
+   * Scaled to the size the catalogue actually records, the same way an
+   * instanced copy of the same model is (`InstancedCatalog.tsx`'s `fit`).
+   *
+   * A catalogue model is authored at whatever scale its maker used, and
+   * nothing upstream of this ever corrected for that — so a chair modelled at
+   * twice life size rendered at twice life size, with only the loading
+   * placeholder and the selection ring (both sized from `dimensionsMm`)
+   * showing the size the object was actually supposed to be. It went
+   * unnoticed on models close to their intended scale and became a visible
+   * pop, or a mismatch against an instanced copy of the same model, on any
+   * model that was not. A venue shell is exempt: its glTF *is* the room, so
+   * its footprint is measured rather than fitted to a stated size.
+   */
+  const fitScale = useMemo(() => {
+    if (isVenueShell) return null;
+    const dims = object.dimensionsMm;
+    if (!dims) return null;
+    const size = new THREE.Box3().setFromObject(instance).getSize(new THREE.Vector3());
+    return new THREE.Vector3(
+      size.x > 0 ? mmToWorld(dims.width) / size.x : 1,
+      size.y > 0 ? mmToWorld(dims.height) / size.y : 1,
+      size.z > 0 ? mmToWorld(dims.depth) / size.z : 1
+    );
+  }, [instance, isVenueShell, object.dimensionsMm]);
+
+  if (fitScale) {
+    return (
+      <group scale={[fitScale.x, fitScale.y, fitScale.z]}>
+        <primitive object={instance} />
+      </group>
+    );
+  }
   return <primitive object={instance} />;
 }
 
@@ -706,6 +739,9 @@ function FinishedFloor() {
 /* ── Ground: receives shadows and placement clicks ─────────────────────── */
 
 function Ground() {
+  const site = useEditor((s) => s.venueSite);
+  const floorYMm = site ? activeSiteFloor(site).elevationMm : 0;
+  const floorY = mmToWorld(floorYMm);
   const pendingItem = useEditor((s) => s.pendingItem);
   const setPendingItem = useEditor((s) => s.setPendingItem);
   const addObjects = useEditor((s) => s.addObjects);
@@ -1022,6 +1058,7 @@ function Ground() {
     <>
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, floorY - 0.004, 0]}
         receiveShadow
         onClick={onClick}
         onPointerMove={onPointerMove}
@@ -1044,8 +1081,14 @@ function Ground() {
         `BackSide` means it is invisible from above and costs nothing in the
         normal view; from beneath it is a solid floor. It never takes a
         raycast, so it cannot steal a placement click from the ground.
+
+        Both planes sit a few millimetres below the active storey's own
+        elevation (`floorY`) rather than at the world's y = 0 — a venue whose
+        ground floor sits above model origin used to leave this catcher
+        coincident with, or just above, the real floor and the venue's own
+        floor mesh, which z-fought every frame as the camera moved.
       */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, -0.002, 0]} raycast={() => null}>
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, floorY - 0.006, 0]} raycast={() => null}>
         <planeGeometry args={[400, 400]} />
         <meshBasicMaterial color="#aeb6c2" side={THREE.FrontSide} />
       </mesh>
@@ -1934,7 +1977,27 @@ function GroundClamp({ orbitRef }: { orbitRef: React.MutableRefObject<any> }) {
       );
       const pivotX = mmToWorld(pivot.xMm);
       const pivotZ = mmToWorld(pivot.zMm);
-      if (Math.abs(controls.target.x - pivotX) > 1e-4 || Math.abs(controls.target.z - pivotZ) > 1e-4) {
+      /*
+       * A real overshoot, not the last few tenths of a millimetre of a damped
+       * glide.
+       *
+       * OrbitControls eases toward its resting position over several frames
+       * once damping is on, so the pivot sits a hair outside these bounds on
+       * almost every frame of every drag near an edge — not because the user
+       * pushed it there, but because damping has not finished settling yet.
+       * Correcting at any nonzero difference fought that settle: this clamp
+       * and the controls' own damping wrote to the same target on the same
+       * frames, so the camera visibly bounced right as a drag ended instead
+       * of coming to the same clean stop it does away from a wall. A
+       * centimetre of tolerance is well under anything a person would notice
+       * as "not actually clamped," and it lets damping finish its own glide
+       * uncontested.
+       */
+      const PIVOT_CLAMP_TOLERANCE_M = 0.01;
+      if (
+        Math.abs(controls.target.x - pivotX) > PIVOT_CLAMP_TOLERANCE_M ||
+        Math.abs(controls.target.z - pivotZ) > PIVOT_CLAMP_TOLERANCE_M
+      ) {
         controls.target.x = pivotX;
         controls.target.z = pivotZ;
         corrected = true;
@@ -3063,7 +3126,7 @@ export function Viewport() {
          * when the two disagreed that frame was a visible jolt from a low
          * horizon view up into the proper one. Same numbers, no jolt.
          */
-        camera={{ fov: 50, near: 0.1, far: 800, position: [13, 13, 18] }}
+        camera={{ fov: 50, near: 0.3, far: 800, position: [13, 13, 18] }}
       >
         <Suspense
           fallback={
