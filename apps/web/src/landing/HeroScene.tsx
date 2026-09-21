@@ -31,15 +31,23 @@ import { isSoftwareRenderer } from '../editor/rendererProfile';
 
 const CYCLE = 16;
 
-/** Where each stage of the build starts and how long it takes, in seconds. */
+/**
+ * Where each stage of the build starts and how long it takes, in seconds.
+ *
+ * The floor starts at `t = 0` on purpose: a page load already spends real
+ * time on the network and on React mounting before this component's first
+ * frame runs, so any further lead-in here was pure added delay on top of
+ * that — a visitor's first look at the render was an empty pad while the
+ * stat chips beside it had already finished animating in.
+ */
 const BEATS = {
-  floor: [0.2, 1.6],
-  deck: [1.4, 2.4],
-  truss: [3.2, 2.6],
-  screen: [5.2, 2.4],
-  tables: [7.0, 3.0],
-  lights: [9.6, 2.0],
-  hold: [12.0, 2.6],
+  floor: [0, 1.4],
+  deck: [1.2, 2.4],
+  truss: [3.0, 2.6],
+  screen: [5.0, 2.4],
+  tables: [6.8, 3.0],
+  lights: [9.4, 2.0],
+  hold: [11.8, 2.6],
 } as const;
 
 /** 0 → 1 across a beat, eased, and clamped outside it. */
