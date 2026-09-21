@@ -207,19 +207,43 @@ export function WorkRail({
   );
 }
 
-/** The heading above the open panel, so it is always clear where you are. */
+/**
+ * The heading above the open panel, so it is always clear where you are.
+ *
+ * Build gets a decorative blue banner behind the badge — matching the "Build
+ * to size" reference exactly — since it is the one panel whose reference
+ * design called for it. Every other panel (including Create & Import, whose
+ * own reference shows a plain white header) keeps the same badge and layout
+ * without the banner.
+ */
 export function PanelHeader({ panel, onClose }: { panel: WorkPanel; onClose?: () => void }) {
   const item = RAIL_ITEMS.find((i) => i.key === panel);
   if (!item) return null;
+  const banner = panel === 'build';
   return (
-    <header className="shrink-0 border-b border-line px-3.5 py-2.5">
-      <div className="flex items-center gap-2">
-        <span className="text-primary">{item.icon}</span>
-        <h2 className="min-w-0 flex-1 truncate text-[13px] font-bold text-ink">{panelTitle(item)}</h2>
+    <header
+      className={`shrink-0 overflow-hidden border-b border-line px-3.5 py-3 ${
+        banner ? 'relative bg-gradient-to-br from-primary-soft to-surface' : ''
+      }`}
+    >
+      {banner ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -right-6 -top-10 h-28 w-28 rounded-full bg-primary/15"
+        />
+      ) : null}
+      <div className="relative flex items-start gap-2.5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary">
+          {item.icon}
+        </span>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <h2 className="truncate text-[14px] font-bold text-ink">{panelTitle(item)}</h2>
+          <p className="mt-0.5 text-[11px] leading-snug text-ink-subtle">{item.help}</p>
+        </div>
         {onClose ? (
           <button
             type="button"
-            className="icon-btn-bare"
+            className="icon-btn-bare shrink-0"
             onClick={onClose}
             aria-label={`Hide the ${item.label} panel`}
             title="Hide this panel"
@@ -230,7 +254,6 @@ export function PanelHeader({ panel, onClose }: { panel: WorkPanel; onClose?: ()
           </button>
         ) : null}
       </div>
-      <p className="mt-0.5 text-[11px] leading-snug text-ink-subtle">{item.help}</p>
     </header>
   );
 }

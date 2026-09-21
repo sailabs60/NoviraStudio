@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   Boxes,
+  ChevronDown,
   Cloud,
   FolderOpen,
   Frame,
@@ -74,8 +75,8 @@ export function CreatePanel() {
         says — and that is 30 px taken from the asset grid on every panel
         open, on the two panels people spend the most time in.
       */}
-      <div className="shrink-0 border-b border-line p-1.5">
-        <div className="ed-segment w-full">
+      <div className="shrink-0 border-b border-line p-2.5">
+        <div className="flex w-full gap-1 rounded-full bg-surface-muted p-1">
           {GROUPS.map((entry) => {
             const Icon = entry.icon;
             const active = group === entry.key;
@@ -86,8 +87,10 @@ export function CreatePanel() {
                 onClick={() => setGroup(entry.key)}
                 title={entry.note}
                 aria-pressed={active}
-                className={`ed-segment-btn flex flex-1 items-center justify-center gap-1 whitespace-nowrap ${
-                  active ? 'ed-segment-btn-active' : ''
+                className={`flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                  active
+                    ? 'bg-primary text-primary-fg shadow-sm'
+                    : 'text-ink-muted hover:text-ink'
                 }`}
               >
                 <Icon className="h-3.5 w-3.5 shrink-0" />
@@ -113,13 +116,12 @@ function ModelsGroup() {
   // a wall of real photography than by the smaller curated set.
   const [tab, setTab] = useState<'catalogue' | 'online' | 'mine' | 'collections'>('online');
 
+  const [moreOpen, setMoreOpen] = useState(false);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="shrink-0 px-3 pt-2.5">
-        <div className="ed-segment w-full">
-          <Tab active={tab === 'catalogue'} onClick={() => setTab('catalogue')} icon={<Boxes className="h-3 w-3" />}>
-            Measured
-          </Tab>
+        <div className="flex w-full items-center gap-1 rounded-full border border-line bg-surface p-1">
           <Tab active={tab === 'online'} onClick={() => setTab('online')} icon={<Cloud className="h-3 w-3" />}>
             Online
           </Tab>
@@ -129,6 +131,33 @@ function ModelsGroup() {
           <Tab active={tab === 'collections'} onClick={() => setTab('collections')} icon={<Layers className="h-3 w-3" />}>
             Collections
           </Tab>
+          <span className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setMoreOpen((o) => !o)}
+              aria-expanded={moreOpen}
+              aria-label="More ways to browse models"
+              className="flex h-6 w-6 items-center justify-center rounded-full text-ink-subtle transition hover:bg-surface-muted hover:text-ink"
+            >
+              <ChevronDown className={`h-3.5 w-3.5 transition ${moreOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {moreOpen ? (
+              <div className="absolute right-0 top-full z-10 mt-1 w-36 rounded-lg border border-line bg-surface p-1 shadow-panel">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTab('catalogue');
+                    setMoreOpen(false);
+                  }}
+                  className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] font-semibold transition ${
+                    tab === 'catalogue' ? 'bg-primary-soft text-primary' : 'text-ink-muted hover:bg-surface-muted hover:text-ink'
+                  }`}
+                >
+                  <Boxes className="h-3 w-3" /> Measured
+                </button>
+              </div>
+            ) : null}
+          </span>
         </div>
       </div>
 
@@ -320,7 +349,9 @@ function Tab({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`ed-segment-btn flex flex-1 items-center justify-center gap-1 ${active ? 'ed-segment-btn-active' : ''}`}
+      className={`flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-full px-2 py-1.5 text-[11px] font-semibold transition ${
+        active ? 'bg-primary-soft text-primary' : 'text-ink-muted hover:text-ink'
+      }`}
     >
       {icon}
       {children}

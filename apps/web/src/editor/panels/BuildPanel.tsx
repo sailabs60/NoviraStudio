@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Boxes, Frame, Layers, Layers3, Monitor, Store, Tent as TentIcon, Type, Wind } from 'lucide-react';
+import { Check, Info, Layers, Wind } from 'lucide-react';
 import {
   createStage,
   type CurtainSceneObject,
@@ -8,7 +8,7 @@ import {
   type TentSceneObject,
 } from '@novira/shared';
 import { useEditor } from '../editorStore';
-import { EmptyState, Section, Segmented } from '../../components/ui';
+import { EmptyState, Section } from '../../components/ui';
 import { TrussBuilder } from './TrussBuilder';
 import { LedBuilder } from './LedBuilder';
 import { BoothBuilder } from './BoothBuilder';
@@ -20,41 +20,41 @@ import { BrandingPanel } from '../BrandingPanel';
 
 type BuildTool = 'stage' | 'truss' | 'led' | 'booth' | 'structures' | 'branding';
 
-const TOOLS: Array<{ value: BuildTool; label: string; icon: JSX.Element; hint: string }> = [
+const TOOLS: Array<{ value: BuildTool; label: string; photo: string; hint: string }> = [
   {
     value: 'stage',
     label: 'Stage',
-    icon: <Layers3 className="h-3.5 w-3.5" />,
+    photo: '/build/stage.jpg',
     hint: 'Modular decks, stairs, skirting and guardrail, with the parts list derived as you build.',
   },
   {
     value: 'truss',
     label: 'Truss',
-    icon: <Frame className="h-3.5 w-3.5" />,
+    photo: '/build/truss.jpg',
     hint: 'Goalposts, grids and arches. The span warning tells you if the section will not take it.',
   },
   {
     value: 'led',
     label: 'LED',
-    icon: <Monitor className="h-3.5 w-3.5" />,
+    photo: '/build/led.jpg',
     hint: 'Screens built from real cabinets, with resolution, weight and power derived.',
   },
   {
     value: 'booth',
     label: 'Stands',
-    icon: <Store className="h-3.5 w-3.5" />,
+    photo: '/build/stands.jpg',
     hint: 'One exhibition stand in detail, or a whole hall floor laid out on the grid.',
   },
   {
     value: 'structures',
     label: 'Tents & drapes',
-    icon: <TentIcon className="h-3.5 w-3.5" />,
+    photo: '/build/tents.jpg',
     hint: 'Framed structures with sidewalls, and pleated drape from a nine-point control grid.',
   },
   {
     value: 'branding',
     label: 'Branding',
-    icon: <Type className="h-3.5 w-3.5" />,
+    photo: '/build/branding.jpg',
     hint: 'Dimensional lettering and artwork — the part where a client identity goes into the room.',
   },
 ];
@@ -115,34 +115,55 @@ export function BuildPanel() {
 
   const editingSelection = toolForType(selected?.type) === tool && selected !== null;
 
+  const activeTool = TOOLS.find((t) => t.value === tool);
+
   return (
     <>
       <Section title="What are you building?">
-        <Segmented
-          value={tool}
-          columns={2}
-          options={TOOLS.map((option) => ({
-            value: option.value,
-            label: option.label,
-            hint: option.hint,
-            icon: option.icon,
-          }))}
-          onChange={(value) => {
-            setTool(value);
-            // Switching tool by hand means starting something new, so the old
-            // selection is dropped — otherwise the panel would show the LED
-            // tab with a truss's properties under it.
-            if (toolForType(selected?.type) !== value) {
-              clearSelection();
-              lastSelectedId.current = null;
-            }
-          }}
-        />
+        <div className="grid grid-cols-3 gap-2.5">
+          {TOOLS.map((option) => {
+            const active = option.value === tool;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => {
+                  setTool(option.value);
+                  // Switching tool by hand means starting something new, so the
+                  // old selection is dropped — otherwise the panel would show
+                  // the LED tab with a truss's properties under it.
+                  if (toolForType(selected?.type) !== option.value) {
+                    clearSelection();
+                    lastSelectedId.current = null;
+                  }
+                }}
+                className={`group overflow-hidden rounded-xl border bg-surface text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                  active ? 'border-primary shadow-sm' : 'border-line hover:border-line-strong'
+                }`}
+              >
+                <span className="relative block aspect-[4/3] w-full overflow-hidden bg-surface-muted">
+                  <img src={option.photo} alt="" className="h-full w-full object-cover" loading="lazy" />
+                  {active ? (
+                    <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-fg shadow-sm">
+                      <Check className="h-3 w-3" strokeWidth={3} />
+                    </span>
+                  ) : null}
+                </span>
+                <span className="block px-2 py-1.5 text-[11px] font-semibold text-ink">{option.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        {activeTool ? (
+          <div className="mt-2.5 flex items-start gap-2 rounded-lg bg-primary-soft px-2.5 py-2 text-primary">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <p className="text-[11px] leading-snug">{activeTool.hint}</p>
+          </div>
+        ) : null}
         {editingSelection ? (
-          <p className="field-hint">
-            <Boxes className="mr-1 inline h-3 w-3" />
-            Editing what you selected. Choose another tab, or click empty floor, to start something new.
-          </p>
+          <p className="field-hint">Editing what you selected. Choose another tab, or click empty floor, to start something new.</p>
         ) : null}
       </Section>
 
